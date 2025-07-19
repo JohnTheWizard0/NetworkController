@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HomeLab Dashboard</title>
     <!-- xterm.js CSS -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
     <style>
         * {
             margin: 0;
@@ -386,6 +386,37 @@
             margin-top: 1rem;
         }
 
+        /* Debug Console */
+        .debug-console {
+            position: fixed;
+            bottom: 0;
+            right: 0;
+            width: 400px;
+            height: 200px;
+            background: #1e1e1e;
+            color: #00ff00;
+            font-family: monospace;
+            font-size: 12px;
+            padding: 10px;
+            border: 1px solid #444;
+            overflow-y: auto;
+            z-index: 9999;
+            display: none;
+        }
+
+        .debug-toggle {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            z-index: 10000;
+        }
+
         /* Mobile Responsiveness */
         @media (max-width: 768px) {
             .header-content {
@@ -424,6 +455,11 @@
             .tab {
                 flex-shrink: 0;
                 white-space: nowrap;
+            }
+
+            .debug-console {
+                width: 90%;
+                height: 150px;
             }
         }
 
@@ -556,6 +592,10 @@
     </style>
 </head>
 <body>
+    <!-- Debug Console -->
+    <button class="debug-toggle" onclick="toggleDebug()">Debug</button>
+    <div id="debugConsole" class="debug-console"></div>
+
     <!-- Header -->
     <header class="header">
         <div class="header-content">
@@ -652,9 +692,25 @@
     </div>
 
     <!-- xterm.js JavaScript -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/addons/xterm-addon-fit/xterm-addon-fit.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
     <script>
+        // Debug-Funktion
+        function debugLog(message) {
+            console.log(message);
+            const debugConsole = document.getElementById('debugConsole');
+            if (debugConsole) {
+                const timestamp = new Date().toLocaleTimeString();
+                debugConsole.innerHTML += `[${timestamp}] ${message}\n`;
+                debugConsole.scrollTop = debugConsole.scrollHeight;
+            }
+        }
+
+        function toggleDebug() {
+            const debugConsole = document.getElementById('debugConsole');
+            debugConsole.style.display = debugConsole.style.display === 'none' ? 'block' : 'none';
+        }
+
         // Sample Data (später aus API)
         const sampleData = {
             networks: [
@@ -750,6 +806,74 @@
         let fitAddon = null;
         let socket = null;
         let currentServer = null;
+
+        // Startup checks
+        document.addEventListener('DOMContentLoaded', () => {
+            debugLog('🚀 Dashboard wird geladen...');
+            
+            // Check if xterm is loaded
+            if (typeof Terminal === 'undefined') {
+                debugLog('❌ xterm.js nicht geladen! Versuche alternativen CDN...');
+                
+                // Try loading from alternative CDN
+                const script1 = document.createElement('script');
+                script1.src = 'https://unpkg.com/xterm@5.3.0/lib/xterm.js';
+                script1.onload = () => {
+                    debugLog('✅ xterm.js von unpkg.com geladen');
+                    
+                    const script2 = document.createElement('script');
+                    script2.src = 'https://unpkg.com/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js';
+                    script2.onload = () => {
+                        debugLog('✅ xterm-addon-fit von unpkg.com geladen');
+                    };
+                    script2.onerror = () => {
+                        debugLog('❌ xterm-addon-fit konnte nicht geladen werden');
+                    };
+                    document.head.appendChild(script2);
+                };
+                script1.onerror = () => {
+                    debugLog('❌ xterm.js konnte von keinem CDN geladen werden');
+                    showToast('Fehler: Terminal-Bibliothek nicht verfügbar. SSH-Feature deaktiviert.');
+                };
+                document.head.appendChild(script1);
+                
+                // Continue with rest of initialization
+                initializeWithoutTerminal();
+                return;
+            }
+            debugLog('✅ xterm.js erfolgreich geladen');
+            
+            // Check WebSocket support
+            if (typeof WebSocket === 'undefined') {
+                debugLog('❌ WebSocket nicht unterstützt!');
+                showToast('Fehler: WebSocket nicht unterstützt');
+                return;
+            }
+            debugLog('✅ WebSocket unterstützt');
+            
+            renderServers();
+            debugLog('✅ Server-Dashboard initialisiert');
+            
+            // ESC key to close terminal
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && document.getElementById('terminalModal').style.display === 'flex') {
+                    closeTerminal();
+                }
+            });
+            
+            // Click outside modal to close
+            document.getElementById('terminalModal').addEventListener('click', function(e) {
+                if (e.target === this) {
+                    closeTerminal();
+                }
+            });
+        });
+
+        function initializeWithoutTerminal() {
+            debugLog('🚀 Dashboard ohne Terminal-Support wird geladen...');
+            renderServers();
+            debugLog('✅ Server-Dashboard initialisiert (ohne SSH-Terminal)');
+        }
 
         // Tab Switching
         document.querySelectorAll('.tab').forEach(tab => {
@@ -962,27 +1086,48 @@
         }
 
         function copySSHCommand(serverId) {
+            debugLog(`🔑 SSH-Button geklickt für Server: ${serverId}`);
+            
             const server = sampleData.servers.find(s => s.id === serverId);
-            if (server) {
-                // Zeige Auswahlmöglichkeiten: Kopieren oder Terminal öffnen
-                const choice = confirm(`SSH zu ${server.name}:\n\nOK = Terminal öffnen\nAbbrechen = SSH-Befehl kopieren`);
-                
-                if (choice) {
-                    openSSHTerminal(server);
-                } else {
-                    const sshCommand = `ssh ${server.access.ssh_user}@${server.host}`;
-                    copyToClipboard(sshCommand);
-                    showToast(`SSH-Befehl kopiert: ${sshCommand}`);
-                }
+            if (!server) {
+                debugLog(`❌ Server ${serverId} nicht gefunden!`);
+                return;
+            }
+            
+            debugLog(`✅ Server gefunden: ${server.name} (${server.host})`);
+            
+            // Zeige Auswahlmöglichkeiten: Kopieren oder Terminal öffnen
+            const choice = confirm(`SSH zu ${server.name}:\n\nOK = Terminal öffnen\nAbbrechen = SSH-Befehl kopieren`);
+            
+            if (choice) {
+                debugLog('🖥️ Terminal öffnen gewählt');
+                openSSHTerminal(server);
+            } else {
+                debugLog('📋 SSH-Befehl kopieren gewählt');
+                const sshCommand = `ssh ${server.access.ssh_user}@${server.host}`;
+                copyToClipboard(sshCommand);
+                showToast(`SSH-Befehl kopiert: ${sshCommand}`);
             }
         }
 
         // Terminal Functions
         function openSSHTerminal(server) {
+            debugLog(`🖥️ Öffne SSH-Terminal für ${server.name}`);
+            
+            // Check if Terminal is available
+            if (typeof Terminal === 'undefined') {
+                debugLog('❌ Terminal nicht verfügbar - zeige SSH-Befehl');
+                const sshCommand = `ssh ${server.access.ssh_user}@${server.host}`;
+                copyToClipboard(sshCommand);
+                showToast(`SSH-Terminal nicht verfügbar. SSH-Befehl kopiert: ${sshCommand}`);
+                return;
+            }
+            
             currentServer = server;
             
             // Initialize terminal if not exists
             if (!terminal) {
+                debugLog('🔧 Initialisiere Terminal...');
                 initializeTerminal();
             }
             
@@ -994,121 +1139,170 @@
             setTimeout(() => {
                 if (fitAddon) {
                     fitAddon.fit();
+                    debugLog('📐 Terminal-Größe angepasst');
                 }
                 connectSSH(server);
             }, 100);
         }
 
         function initializeTerminal() {
-            // Create terminal instance
-            terminal = new Terminal({
-                cursorBlink: true,
-                fontSize: 14,
-                fontFamily: '"Cascadia Code", "Fira Code", "DejaVu Sans Mono", monospace',
-                theme: {
-                    background: '#1e1e1e',
-                    foreground: '#d4d4d4',
-                    cursor: '#ffffff',
-                    selection: '#264f78',
-                    black: '#000000',
-                    red: '#cd3131',
-                    green: '#0dbc79',
-                    yellow: '#e5e510',
-                    blue: '#2472c8',
-                    magenta: '#bc3fbc',
-                    cyan: '#11a8cd',
-                    white: '#e5e5e5',
-                    brightBlack: '#666666',
-                    brightRed: '#f14c4c',
-                    brightGreen: '#23d18b',
-                    brightYellow: '#f5f543',
-                    brightBlue: '#3b8eea',
-                    brightMagenta: '#d670d6',
-                    brightCyan: '#29b8db',
-                    brightWhite: '#e5e5e5'
+            try {
+                // Check if Terminal is available
+                if (typeof Terminal === 'undefined') {
+                    debugLog('❌ Terminal-Klasse nicht verfügbar');
+                    return false;
                 }
-            });
+                
+                // Create terminal instance
+                terminal = new Terminal({
+                    cursorBlink: true,
+                    fontSize: 14,
+                    fontFamily: '"Cascadia Code", "Fira Code", "DejaVu Sans Mono", monospace',
+                    theme: {
+                        background: '#1e1e1e',
+                        foreground: '#d4d4d4',
+                        cursor: '#ffffff',
+                        selection: '#264f78',
+                        black: '#000000',
+                        red: '#cd3131',
+                        green: '#0dbc79',
+                        yellow: '#e5e510',
+                        blue: '#2472c8',
+                        magenta: '#bc3fbc',
+                        cyan: '#11a8cd',
+                        white: '#e5e5e5',
+                        brightBlack: '#666666',
+                        brightRed: '#f14c4c',
+                        brightGreen: '#23d18b',
+                        brightYellow: '#f5f543',
+                        brightBlue: '#3b8eea',
+                        brightMagenta: '#d670d6',
+                        brightCyan: '#29b8db',
+                        brightWhite: '#e5e5e5'
+                    }
+                });
 
-            // Add fit addon
-            fitAddon = new FitAddon.FitAddon();
-            terminal.loadAddon(fitAddon);
+                // Add fit addon if available
+                if (typeof FitAddon !== 'undefined' && FitAddon.FitAddon) {
+                    fitAddon = new FitAddon.FitAddon();
+                    terminal.loadAddon(fitAddon);
+                    debugLog('✅ FitAddon geladen');
+                } else if (window.FitAddon) {
+                    fitAddon = new window.FitAddon();
+                    terminal.loadAddon(fitAddon);
+                    debugLog('✅ FitAddon (window) geladen');
+                } else {
+                    debugLog('⚠️ FitAddon nicht verfügbar');
+                }
 
-            // Open terminal in container
-            terminal.open(document.getElementById('terminal'));
-            
-            // Welcome message
-            terminal.writeln('\x1b[1;36m╔══════════════════════════════════════╗\x1b[0m');
-            terminal.writeln('\x1b[1;36m║        HomeLab SSH Terminal          ║\x1b[0m');
-            terminal.writeln('\x1b[1;36m╚══════════════════════════════════════╝\x1b[0m');
-            terminal.writeln('');
-            terminal.writeln('\x1b[33mBereit für SSH-Verbindung...\x1b[0m');
+                // Open terminal in container
+                terminal.open(document.getElementById('terminal'));
+                debugLog('✅ Terminal erfolgreich initialisiert');
+                
+                // Welcome message
+                terminal.writeln('\x1b[1;36m╔══════════════════════════════════════╗\x1b[0m');
+                terminal.writeln('\x1b[1;36m║        HomeLab SSH Terminal          ║\x1b[0m');
+                terminal.writeln('\x1b[1;36m╚══════════════════════════════════════╝\x1b[0m');
+                terminal.writeln('');
+                terminal.writeln('\x1b[33mBereit für SSH-Verbindung...\x1b[0m');
+                
+                return true;
+                
+            } catch (error) {
+                debugLog(`❌ Terminal-Initialisierung fehlgeschlagen: ${error.message}`);
+                showToast('Fehler beim Initialisieren des Terminals');
+                return false;
+            }
         }
 
         function connectSSH(server) {
+            debugLog(`🔌 Starte SSH-Verbindung zu ${server.host}...`);
             updateConnectionStatus('connecting', 'Verbinde...');
             
             // Create WebSocket connection to backend
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}/ws/ssh`;
             
-            socket = new WebSocket(wsUrl);
+            debugLog(`🔗 WebSocket-URL: ${wsUrl}`);
             
-            socket.onopen = function() {
-                updateConnectionStatus('connected', 'Verbunden');
+            try {
+                socket = new WebSocket(wsUrl);
                 
-                // Send SSH connection request
-                socket.send(JSON.stringify({
-                    action: 'connect',
-                    host: server.host,
-                    username: server.access.ssh_user,
-                    port: 22
-                }));
+                socket.onopen = function() {
+                    debugLog('✅ WebSocket-Verbindung hergestellt');
+                    updateConnectionStatus('connected', 'Verbunden');
+                    
+                    // Send SSH connection request
+                    const sshRequest = {
+                        action: 'connect',
+                        host: server.host,
+                        username: server.access.ssh_user,
+                        port: 22
+                    };
+                    
+                    debugLog(`📤 Sende SSH-Request: ${JSON.stringify(sshRequest)}`);
+                    socket.send(JSON.stringify(sshRequest));
+                    
+                    terminal.writeln(`\x1b[32mVerbinde zu ${server.access.ssh_user}@${server.host}...\x1b[0m`);
+                };
                 
-                terminal.writeln(`\x1b[32mVerbinde zu ${server.access.ssh_user}@${server.host}...\x1b[0m`);
-            };
-            
-            socket.onmessage = function(event) {
-                const data = JSON.parse(event.data);
+                socket.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        debugLog(`📥 WebSocket-Nachricht: ${data.type}`);
+                        
+                        switch(data.type) {
+                            case 'output':
+                                terminal.write(data.data);
+                                break;
+                            case 'connected':
+                                terminal.writeln('\x1b[32mSSH-Verbindung erfolgreich!\x1b[0m');
+                                document.getElementById('terminalInfo').textContent = `Verbunden mit ${server.name}`;
+                                debugLog('🎉 SSH-Verbindung erfolgreich!');
+                                break;
+                            case 'error':
+                                terminal.writeln(`\x1b[31mFehler: ${data.message}\x1b[0m`);
+                                updateConnectionStatus('disconnected', 'Fehler');
+                                debugLog(`❌ SSH-Fehler: ${data.message}`);
+                                break;
+                            case 'disconnected':
+                                terminal.writeln('\x1b[33mVerbindung getrennt.\x1b[0m');
+                                updateConnectionStatus('disconnected', 'Getrennt');
+                                debugLog('🔌 SSH-Verbindung getrennt');
+                                break;
+                        }
+                    } catch (parseError) {
+                        debugLog(`❌ JSON-Parse-Fehler: ${parseError.message}`);
+                    }
+                };
                 
-                switch(data.type) {
-                    case 'output':
-                        terminal.write(data.data);
-                        break;
-                    case 'connected':
-                        terminal.writeln('\x1b[32mSSH-Verbindung erfolgreich!\x1b[0m');
-                        document.getElementById('terminalInfo').textContent = `Verbunden mit ${server.name}`;
-                        break;
-                    case 'error':
-                        terminal.writeln(`\x1b[31mFehler: ${data.message}\x1b[0m`);
-                        updateConnectionStatus('disconnected', 'Fehler');
-                        break;
-                    case 'disconnected':
-                        terminal.writeln('\x1b[33mVerbindung getrennt.\x1b[0m');
-                        updateConnectionStatus('disconnected', 'Getrennt');
-                        break;
-                }
-            };
-            
-            socket.onerror = function(error) {
-                terminal.writeln('\x1b[31mWebSocket-Fehler: Backend nicht erreichbar\x1b[0m');
-                terminal.writeln('\x1b[33mHinweis: SSH-Terminal benötigt Backend-Integration\x1b[0m');
-                updateConnectionStatus('disconnected', 'Backend fehlt');
-            };
-            
-            socket.onclose = function() {
-                updateConnectionStatus('disconnected', 'Getrennt');
-                document.getElementById('terminalInfo').textContent = 'Verbindung geschlossen';
-            };
-            
-            // Handle terminal input
-            terminal.onData(function(data) {
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({
-                        action: 'input',
-                        data: data
-                    }));
-                }
-            });
+                socket.onerror = function(error) {
+                    debugLog(`❌ WebSocket-Fehler: ${error}`);
+                    terminal.writeln('\x1b[31mWebSocket-Fehler: Backend nicht erreichbar\x1b[0m');
+                    terminal.writeln('\x1b[33mHinweis: SSH-Terminal benötigt Backend-Integration\x1b[0m');
+                    updateConnectionStatus('disconnected', 'Backend fehlt');
+                };
+                
+                socket.onclose = function(event) {
+                    debugLog(`🔌 WebSocket geschlossen: Code ${event.code}, Reason: ${event.reason}`);
+                    updateConnectionStatus('disconnected', 'Getrennt');
+                    document.getElementById('terminalInfo').textContent = 'Verbindung geschlossen';
+                };
+                
+                // Handle terminal input
+                terminal.onData(function(data) {
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({
+                            action: 'input',
+                            data: data
+                        }));
+                    }
+                });
+                
+            } catch (error) {
+                debugLog(`❌ WebSocket-Initialisierung fehlgeschlagen: ${error.message}`);
+                showToast('Fehler beim Verbinden zum Backend');
+            }
         }
 
         function updateConnectionStatus(status, text) {
@@ -1117,17 +1311,21 @@
             
             statusDot.className = `status-dot ${status}`;
             statusText.textContent = text;
+            
+            debugLog(`🔄 Verbindungsstatus: ${status} - ${text}`);
         }
 
         function clearTerminal() {
             if (terminal) {
                 terminal.clear();
+                debugLog('🧹 Terminal geleert');
             }
         }
 
         function disconnectSSH() {
             if (socket) {
                 socket.close();
+                debugLog('🔌 SSH-Verbindung manuell getrennt');
             }
             updateConnectionStatus('disconnected', 'Getrennt');
             if (terminal) {
@@ -1136,6 +1334,7 @@
         }
 
         function closeTerminal() {
+            debugLog('❌ Terminal schließen');
             disconnectSSH();
             document.getElementById('terminalModal').style.display = 'none';
         }
@@ -1163,6 +1362,7 @@
         }
 
         function showToast(message) {
+            debugLog(`💬 Toast: ${message}`);
             // Simple toast notification
             const toast = document.createElement('div');
             toast.style.cssText = `
@@ -1194,25 +1394,6 @@
         function attachEventListeners() {
             // Re-attach any dynamic event listeners if needed
         }
-
-        // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
-            renderServers();
-            
-            // ESC key to close terminal
-            document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape' && document.getElementById('terminalModal').style.display === 'flex') {
-                    closeTerminal();
-                }
-            });
-            
-            // Click outside modal to close
-            document.getElementById('terminalModal').addEventListener('click', function(e) {
-                if (e.target === this) {
-                    closeTerminal();
-                }
-            });
-        });
 
         // Add simple animations
         const style = document.createElement('style');
