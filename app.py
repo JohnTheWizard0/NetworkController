@@ -12,6 +12,7 @@ from typing import Dict, Optional
 import paramiko
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 import uvicorn
 
 
@@ -135,7 +136,13 @@ connections: Dict[str, SSHConnection] = {}
 @app.get("/")
 async def root():
     """Redirect to static frontend"""
-    return {"message": "HomeLab Dashboard SSH Backend running"}
+    return RedirectResponse(url="/static/index.html")
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "ok", "message": "HomeLab Dashboard is running"}
 
 
 @app.websocket("/ws/ssh")
@@ -187,7 +194,8 @@ async def ssh_websocket(websocket: WebSocket):
 
 if __name__ == "__main__":
     print("🏠 HomeLab Dashboard SSH Backend")
-    print("Frontend: http://localhost:8000/static/index.html")
+    print("Frontend: http://localhost:8000/")
+    print("Health: http://localhost:8000/health")
     print("WebSocket: ws://localhost:8000/ws/ssh")
     
     uvicorn.run(
