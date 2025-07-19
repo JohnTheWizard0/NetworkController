@@ -136,7 +136,7 @@ connections: Dict[str, SSHConnection] = {}
 @app.get("/")
 async def root():
     """Redirect to static frontend"""
-    return RedirectResponse(url="/static/index.html")
+    return RedirectResponse(url="/var/www/NetworkController/static/index.html")
 
 
 @app.get("/health")
