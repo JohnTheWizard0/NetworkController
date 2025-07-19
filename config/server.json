@@ -1,0 +1,83 @@
+{
+  "networks": [
+    {
+      "name": "Intern",
+      "subnet": "192.168.1.0/24",
+      "color": "#2ecc71"
+    },
+    {
+      "name": "DMZ",
+      "subnet": "192.168.7.0/24",
+      "color": "#e74c3c"
+    }
+  ],
+  "servers": [
+    {
+      "id": "hnc04",
+      "name": "HNC04",
+      "services": "Redmine, SillyTavern",
+      "network": "Intern",
+      "host": "192.168.1.15",
+      "dns": [
+        "hnc04.int.hekate.dev",
+        "sillytavern.int.hekate.dev",
+        "redmine.hekate.dev"
+      ],
+      "shared": true,
+      "access": {
+        "ssh": true,
+        "ssh_user": "root"
+      },
+      "ports": [
+        { "number": 22, "service": "SSH" },
+        { "number": 3000, "service": "SillyTavern" },
+        { "number": 8000, "service": "Redmine" }
+      ],
+      "notes": "Produktiv-System, Updates nur nach Absprache",
+      "status": "online"
+    },
+    {
+      "id": "hcm",
+      "name": "HCM",
+      "services": "Element",
+      "network": "Intern",
+      "host": "192.168.1.14",
+      "dns": [
+        "hcm.int.hekate.dev",
+        "matrix.hekate.dev"
+      ],
+      "shared": false,
+      "access": {
+        "ssh": true,
+        "ssh_user": "admin"
+      },
+      "ports": [
+        { "number": 8448, "service": "Federation" },
+        { "number": 443, "service": "HTTPS" }
+      ],
+      "notes": "",
+      "status": "online"
+    },
+    {
+      "id": "backup01",
+      "name": "Backup01",
+      "services": "Restic, Rsync",
+      "network": "DMZ",
+      "host": "192.168.7.10",
+      "dns": [
+        "backup.hekate.dev"
+      ],
+      "shared": false,
+      "access": {
+        "ssh": true,
+        "ssh_user": "backup"
+      },
+      "ports": [
+        { "number": 22, "service": "SSH" },
+        { "number": 873, "service": "Rsync" }
+      ],
+      "notes": "Tägliche Backups um 02:00 Uhr",
+      "status": "offline"
+    }
+  ]
+}
