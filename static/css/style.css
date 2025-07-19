@@ -241,6 +241,13 @@ body {
     font-size: 1rem;
 }
 
+.server-ip-inline {
+    font-weight: 400;
+    color: #7f8c8d;
+    font-size: 0.85rem;
+    font-family: monospace;
+}
+
 .server-indicators {
     display: flex;
     gap: 0.25rem;
