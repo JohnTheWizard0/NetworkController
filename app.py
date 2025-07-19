@@ -126,8 +126,8 @@ class SSHConnection:
 # FastAPI App
 app = FastAPI(title="HomeLab Dashboard")
 
-# Static Files (dein Frontend)
-app.mount("/var/www/NetworkController/static", StaticFiles(directory="static"), name="static")
+# Static Files - KORRIGIERT: relativer Pfad
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # In-Memory Connection Store
 connections: Dict[str, SSHConnection] = {}
@@ -136,7 +136,7 @@ connections: Dict[str, SSHConnection] = {}
 @app.get("/")
 async def root():
     """Redirect to static frontend"""
-    return RedirectResponse(url="/var/www/NetworkController/static/index.html")
+    return RedirectResponse(url="/static/index.html")
 
 
 @app.get("/health")
