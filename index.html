@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HomeLab Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            color: #2c3e50;
+            line-height: 1.6;
+        }
+
+        /* Header */
+        .header {
+            background: white;
+            border-bottom: 1px solid #e1e8ed;
+            padding: 1rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .search-box {
+            position: relative;
+        }
+
+        .search-input {
+            padding: 0.5rem 1rem 0.5rem 2.5rem;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            width: 250px;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #7f8c8d;
+        }
+
+        .settings-btn {
+            background: none;
+            border: none;
+            font-size: 1.2rem;
+            padding: 0.5rem;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .settings-btn:hover {
+            background: #f8f9fa;
+        }
+
+        /* Navigation Tabs */
+        .nav-tabs {
+            background: white;
+            border-bottom: 1px solid #e1e8ed;
+            padding: 0 2rem;
+        }
+
+        .tab-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            gap: 2rem;
+        }
+
+        .tab {
+            padding: 1rem 0;
+            color: #7f8c8d;
+            text-decoration: none;
+            font-weight: 500;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .tab:hover {
+            color: #2c3e50;
+        }
+
+        .tab.active {
+            color: #3498db;
+            border-bottom-color: #3498db;
+        }
+
+        /* Main Content */
+        .main-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        /* Filter Tabs */
+        .filter-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .filter-tab {
+            padding: 0.5rem 1rem;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.9rem;
+        }
+
+        .filter-tab:hover {
+            background: #f8f9fa;
+        }
+
+        .filter-tab.active {
+            background: #3498db;
+            color: white;
+            border-color: #3498db;
+        }
+
+        /* Network Sections */
+        .network-section {
+            margin-bottom: 2rem;
+        }
+
+        .network-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            padding: 0.75rem 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .network-header:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+
+        .network-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+
+        .network-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .network-subtitle {
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+
+        .expand-icon {
+            margin-left: auto;
+            transition: transform 0.2s;
+        }
+
+        .network-section.collapsed .expand-icon {
+            transform: rotate(-90deg);
+        }
+
+        /* Server Grid */
+        .server-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1rem;
+            transition: all 0.3s;
+        }
+
+        .network-section.collapsed .server-grid {
+            display: none;
+        }
+
+        /* Server Cards */
+        .server-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .server-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transform: translateY(-2px);
+        }
+
+        .server-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .server-name {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        .server-indicators {
+            display: flex;
+            gap: 0.25rem;
+            align-items: center;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #2ecc71;
+        }
+
+        .status-indicator.offline {
+            background: #e74c3c;
+        }
+
+        .shared-indicator {
+            font-size: 0.8rem;
+        }
+
+        .server-services {
+            color: #7f8c8d;
+            font-size: 0.9rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .server-dns {
+            margin-bottom: 0.75rem;
+        }
+
+        .dns-link {
+            color: #3498db;
+            text-decoration: none;
+            font-size: 0.9rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .dns-link:hover {
+            text-decoration: underline;
+        }
+
+        .server-actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .action-btn {
+            padding: 0.25rem 0.75rem;
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .action-btn:hover {
+            background: #e9ecef;
+        }
+
+        .action-btn.ssh {
+            background: #2c3e50;
+            color: white;
+            border-color: #2c3e50;
+        }
+
+        .action-btn.ssh:hover {
+            background: #34495e;
+        }
+
+        /* Expanded Server Card */
+        .server-card.expanded {
+            grid-column: 1 / -1;
+            max-width: 600px;
+        }
+
+        .server-details {
+            display: none;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #eee;
+        }
+
+        .server-card.expanded .server-details {
+            display: block;
+        }
+
+        .detail-section {
+            margin-bottom: 1rem;
+        }
+
+        .detail-title {
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #2c3e50;
+        }
+
+        .detail-list {
+            list-style: none;
+        }
+
+        .detail-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.25rem;
+            font-size: 0.9rem;
+        }
+
+        .port-link {
+            margin-left: auto;
+            color: #3498db;
+            text-decoration: none;
+            font-size: 0.8rem;
+        }
+
+        .server-ip {
+            font-family: monospace;
+            background: #f8f9fa;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+
+        .server-notes {
+            background: #f8f9fa;
+            padding: 0.75rem;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            color: #5a6c7d;
+            margin-top: 1rem;
+        }
+
+        /* Mobile Responsiveness */
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                gap: 1rem;
+                align-items: stretch;
+            }
+
+            .search-input {
+                width: 100%;
+            }
+
+            .main-content {
+                padding: 1rem;
+            }
+
+            .server-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .filter-tabs {
+                overflow-x: auto;
+                white-space: nowrap;
+                padding-bottom: 0.5rem;
+            }
+
+            .filter-tab {
+                flex-shrink: 0;
+            }
+
+            .tab-container {
+                overflow-x: auto;
+                padding-bottom: 0.5rem;
+            }
+
+            .tab {
+                flex-shrink: 0;
+                white-space: nowrap;
+            }
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: #7f8c8d;
+        }
+
+        .empty-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                🏠 HomeLab Dashboard
+            </div>
+            <div class="header-actions">
+                <div class="search-box">
+                    <input type="text" class="search-input" placeholder="Server, Service oder DNS suchen..." id="searchInput">
+                    <span class="search-icon">🔍</span>
+                </div>
+                <button class="settings-btn" onclick="showSettings()">⚙️</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+        <div class="tab-container">
+            <a href="#" class="tab active" data-tab="dashboard">Dashboard</a>
+            <a href="#" class="tab" data-tab="network">Netzwerk-Übersicht</a>
+            <a href="#" class="tab" data-tab="monitoring">Monitoring</a>
+            <a href="#" class="tab" data-tab="settings">Einstellungen</a>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Dashboard Tab Content -->
+        <div id="dashboard-content" class="tab-content">
+            <!-- Filter Tabs -->
+            <div class="filter-tabs">
+                <div class="filter-tab active" data-filter="all">Alle</div>
+                <div class="filter-tab" data-filter="intern">Intern</div>
+                <div class="filter-tab" data-filter="dmz">DMZ</div>
+                <div class="filter-tab" data-filter="shared">Shared</div>
+                <div class="filter-tab" data-filter="ssh">SSH</div>
+            </div>
+
+            <!-- Server Content -->
+            <div id="server-content">
+                <!-- Will be populated by JavaScript -->
+            </div>
+        </div>
+
+        <!-- Other Tab Contents (Placeholder) -->
+        <div id="network-content" class="tab-content" style="display: none;">
+            <div class="empty-state">
+                <div class="empty-icon">🌐</div>
+                <h3>Netzwerk-Übersicht</h3>
+                <p>Grafische Netzwerkdarstellung folgt in Phase 2</p>
+            </div>
+        </div>
+
+        <div id="monitoring-content" class="tab-content" style="display: none;">
+            <div class="empty-state">
+                <div class="empty-icon">📊</div>
+                <h3>Monitoring</h3>
+                <p>Live-Status und Metriken folgen in Phase 2</p>
+            </div>
+        </div>
+
+        <div id="settings-content" class="tab-content" style="display: none;">
+            <div class="empty-state">
+                <div class="empty-icon">⚙️</div>
+                <h3>Einstellungen</h3>
+                <p>Konfiguration folgt in Phase 2</p>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Sample Data (später aus API)
+        const sampleData = {
+            networks: [
+                {
+                    name: "Intern",
+                    subnet: "192.168.1.0/24",
+                    color: "#2ecc71"
+                },
+                {
+                    name: "DMZ",
+                    subnet: "192.168.7.0/24",
+                    color: "#e74c3c"
+                }
+            ],
+            servers: [
+                {
+                    id: "hnc04",
+                    name: "HNC04",
+                    services: "Redmine, SillyTavern",
+                    network: "Intern",
+                    host: "192.168.1.15",
+                    dns: [
+                        "hnc04.int.hekate.dev",
+                        "sillytavern.int.hekate.dev",
+                        "redmine.hekate.dev"
+                    ],
+                    shared: true,
+                    access: {
+                        ssh: true,
+                        ssh_user: "root"
+                    },
+                    ports: [
+                        { number: 22, service: "SSH" },
+                        { number: 3000, service: "SillyTavern" },
+                        { number: 8000, service: "Redmine" }
+                    ],
+                    notes: "Produktiv-System, Updates nur nach Absprache",
+                    status: "online"
+                },
+                {
+                    id: "hcm",
+                    name: "HCM",
+                    services: "Element",
+                    network: "Intern",
+                    host: "192.168.1.14",
+                    dns: [
+                        "hcm.int.hekate.dev",
+                        "matrix.hekate.dev"
+                    ],
+                    shared: false,
+                    access: {
+                        ssh: true,
+                        ssh_user: "admin"
+                    },
+                    ports: [
+                        { number: 8448, service: "Federation" },
+                        { number: 443, service: "HTTPS" }
+                    ],
+                    notes: "",
+                    status: "online"
+                },
+                {
+                    id: "backup01",
+                    name: "Backup01",
+                    services: "Restic, Rsync",
+                    network: "DMZ",
+                    host: "192.168.7.10",
+                    dns: [
+                        "backup.hekate.dev"
+                    ],
+                    shared: false,
+                    access: {
+                        ssh: true,
+                        ssh_user: "backup"
+                    },
+                    ports: [
+                        { number: 22, service: "SSH" },
+                        { number: 873, service: "Rsync" }
+                    ],
+                    notes: "Tägliche Backups um 02:00 Uhr",
+                    status: "offline"
+                }
+            ]
+        };
+
+        // State Management
+        let currentFilter = 'all';
+        let searchTerm = '';
+        let expandedCards = new Set();
+
+        // Tab Switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                e.preventDefault();
+                
+                // Update active tab
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                
+                // Show/hide content
+                const tabName = tab.dataset.tab;
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.style.display = 'none';
+                });
+                
+                const targetContent = document.getElementById(`${tabName}-content`);
+                if (targetContent) {
+                    targetContent.style.display = 'block';
+                }
+            });
+        });
+
+        // Filter Tabs
+        document.querySelectorAll('.filter-tab').forEach(filterTab => {
+            filterTab.addEventListener('click', () => {
+                document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+                filterTab.classList.add('active');
+                currentFilter = filterTab.dataset.filter;
+                renderServers();
+            });
+        });
+
+        // Search
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+            searchTerm = e.target.value.toLowerCase();
+            renderServers();
+        });
+
+        // Filter Logic
+        function filterServers(servers) {
+            return servers.filter(server => {
+                // Search filter
+                if (searchTerm) {
+                    const searchable = `${server.name} ${server.services} ${server.dns.join(' ')}`.toLowerCase();
+                    if (!searchable.includes(searchTerm)) {
+                        return false;
+                    }
+                }
+
+                // Category filter
+                switch (currentFilter) {
+                    case 'all':
+                        return true;
+                    case 'intern':
+                        return server.network === 'Intern';
+                    case 'dmz':
+                        return server.network === 'DMZ';
+                    case 'shared':
+                        return server.shared;
+                    case 'ssh':
+                        return server.access.ssh;
+                    default:
+                        return true;
+                }
+            });
+        }
+
+        // Render Functions
+        function renderServers() {
+            const serverContent = document.getElementById('server-content');
+            const filteredServers = filterServers(sampleData.servers);
+            
+            if (filteredServers.length === 0) {
+                serverContent.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">🔍</div>
+                        <h3>Keine Server gefunden</h3>
+                        <p>Versuche einen anderen Filter oder Suchbegriff</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Group by network
+            const serversByNetwork = {};
+            filteredServers.forEach(server => {
+                if (!serversByNetwork[server.network]) {
+                    serversByNetwork[server.network] = [];
+                }
+                serversByNetwork[server.network].push(server);
+            });
+
+            let html = '';
+            sampleData.networks.forEach(network => {
+                const networkServers = serversByNetwork[network.name];
+                if (networkServers && networkServers.length > 0) {
+                    html += renderNetworkSection(network, networkServers);
+                }
+            });
+
+            serverContent.innerHTML = html;
+            attachEventListeners();
+        }
+
+        function renderNetworkSection(network, servers) {
+            const isCollapsed = false; // Could store in localStorage later
+            
+            return `
+                <div class="network-section ${isCollapsed ? 'collapsed' : ''}">
+                    <div class="network-header" onclick="toggleNetworkSection(this)">
+                        <div class="network-indicator" style="background-color: ${network.color}"></div>
+                        <div>
+                            <div class="network-title">▼ ${network.name}</div>
+                            <div class="network-subtitle">(${network.subnet}) • ${servers.length} Server</div>
+                        </div>
+                        <div class="expand-icon">▼</div>
+                    </div>
+                    <div class="server-grid">
+                        ${servers.map(server => renderServerCard(server)).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderServerCard(server) {
+            const isExpanded = expandedCards.has(server.id);
+            
+            return `
+                <div class="server-card ${isExpanded ? 'expanded' : ''}" data-server-id="${server.id}">
+                    <div class="server-header">
+                        <div class="server-name">${server.name}</div>
+                        <div class="server-indicators">
+                            <div class="status-indicator ${server.status}"></div>
+                            ${server.shared ? '<span class="shared-indicator">⚠️</span>' : ''}
+                        </div>
+                    </div>
+                    
+                    <div class="server-services">${server.services}</div>
+                    
+                    <div class="server-dns">
+                        <a href="https://${server.dns[0]}" target="_blank" class="dns-link">
+                            ${server.dns[0]} ↗
+                        </a>
+                    </div>
+                    
+                    <div class="server-actions">
+                        ${server.access.ssh ? '<button class="action-btn ssh" onclick="copySSHCommand(\'' + server.id + '\')">SSH</button>' : ''}
+                        <button class="action-btn" onclick="toggleServerCard('${server.id}')">${isExpanded ? 'Collapse ▲' : 'Expand ▼'}</button>
+                    </div>
+                    
+                    ${isExpanded ? renderServerDetails(server) : ''}
+                </div>
+            `;
+        }
+
+        function renderServerDetails(server) {
+            return `
+                <div class="server-details">
+                    <div class="detail-section">
+                        <div class="detail-title">DNS:</div>
+                        <ul class="detail-list">
+                            ${server.dns.map(dns => `
+                                <li class="detail-item">
+                                    • <a href="https://${dns}" target="_blank" class="dns-link">${dns}</a>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                    
+                    <div class="detail-section">
+                        <div class="detail-title">Ports:</div>
+                        <ul class="detail-list">
+                            ${server.ports.map(port => `
+                                <li class="detail-item">
+                                    • :${port.number} (${port.service})
+                                    <a href="http://${server.host}:${port.number}" target="_blank" class="port-link">↗</a>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                    
+                    <div class="detail-section">
+                        <div class="detail-title">IP:</div>
+                        <div class="server-ip" onclick="copyToClipboard('${server.host}')">${server.host} 📋</div>
+                    </div>
+                    
+                    ${server.notes ? `
+                        <div class="server-notes">
+                            📝 ${server.notes}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        // Event Handlers
+        function toggleNetworkSection(header) {
+            const section = header.parentElement;
+            section.classList.toggle('collapsed');
+        }
+
+        function toggleServerCard(serverId) {
+            if (expandedCards.has(serverId)) {
+                expandedCards.delete(serverId);
+            } else {
+                expandedCards.add(serverId);
+            }
+            renderServers();
+        }
+
+        function copySSHCommand(serverId) {
+            const server = sampleData.servers.find(s => s.id === serverId);
+            if (server) {
+                const sshCommand = `ssh ${server.access.ssh_user}@${server.host}`;
+                copyToClipboard(sshCommand);
+                showToast(`SSH-Befehl kopiert: ${sshCommand}`);
+            }
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast(`Kopiert: ${text}`);
+            }).catch(() => {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                showToast(`Kopiert: ${text}`);
+            });
+        }
+
+        function showToast(message) {
+            // Simple toast notification
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: #2c3e50;
+                color: white;
+                padding: 1rem;
+                border-radius: 4px;
+                z-index: 1000;
+                animation: slideIn 0.3s ease-out;
+            `;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.animation = 'slideOut 0.3s ease-out';
+                setTimeout(() => {
+                    document.body.removeChild(toast);
+                }, 300);
+            }, 3000);
+        }
+
+        function showSettings() {
+            showToast('Einstellungen folgen in Phase 2');
+        }
+
+        function attachEventListeners() {
+            // Re-attach any dynamic event listeners if needed
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            renderServers();
+        });
+
+        // Add simple animations
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes slideIn {
+                from { transform: translateX(100%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+            }
+            @keyframes slideOut {
+                from { transform: translateX(0); opacity: 1; }
+                to { transform: translateX(100%); opacity: 0; }
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>
