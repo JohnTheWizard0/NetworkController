@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HomeLab Dashboard</title>
+    <!-- xterm.js CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.css">
     <style>
         * {
             margin: 0;
@@ -324,8 +326,7 @@
 
         /* Expanded Server Card */
         .server-card.expanded {
-            grid-column: 1 / -1;
-            max-width: 600px;
+            /* Behält die normale Grid-Breite bei */
         }
 
         .server-details {
@@ -437,6 +438,121 @@
             font-size: 3rem;
             margin-bottom: 1rem;
         }
+
+        /* Terminal Modal */
+        .terminal-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .terminal-container {
+            background: #1e1e1e;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 1000px;
+            height: 80%;
+            max-height: 600px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .terminal-header {
+            background: #2d2d2d;
+            padding: 0.75rem 1rem;
+            border-radius: 8px 8px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #404040;
+        }
+
+        .terminal-title {
+            color: #fff;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .terminal-controls {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .terminal-btn {
+            background: none;
+            border: none;
+            color: #ccc;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.2s;
+        }
+
+        .terminal-btn:hover {
+            background: #404040;
+            color: #fff;
+        }
+
+        .terminal-btn.close {
+            color: #ff5f56;
+        }
+
+        .terminal-btn.close:hover {
+            background: #ff5f56;
+            color: #fff;
+        }
+
+        .terminal-body {
+            flex: 1;
+            padding: 0.5rem;
+            background: #1e1e1e;
+            border-radius: 0 0 8px 8px;
+            overflow: hidden;
+        }
+
+        .xterm-viewport {
+            background-color: transparent !important;
+        }
+
+        .terminal-status {
+            padding: 0.5rem 1rem;
+            background: #2d2d2d;
+            color: #ccc;
+            font-size: 0.8rem;
+            border-top: 1px solid #404040;
+            display: flex;
+            gap: 1rem;
+        }
+
+        .status-indicator-terminal {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ffd700;
+        }
+
+        .status-dot.connected {
+            background: #00ff00;
+        }
+
+        .status-dot.disconnected {
+            background: #ff4444;
+        }
     </style>
 </head>
 <body>
@@ -511,6 +627,33 @@
         </div>
     </main>
 
+    <!-- Terminal Modal -->
+    <div id="terminalModal" class="terminal-modal">
+        <div class="terminal-container">
+            <div class="terminal-header">
+                <div class="terminal-title" id="terminalTitle">SSH - Verbinde...</div>
+                <div class="terminal-controls">
+                    <button class="terminal-btn" onclick="clearTerminal()">Clear</button>
+                    <button class="terminal-btn" onclick="disconnectSSH()">Disconnect</button>
+                    <button class="terminal-btn close" onclick="closeTerminal()">✕</button>
+                </div>
+            </div>
+            <div class="terminal-body">
+                <div id="terminal"></div>
+            </div>
+            <div class="terminal-status">
+                <div class="status-indicator-terminal">
+                    <div class="status-dot" id="connectionStatus"></div>
+                    <span id="connectionText">Getrennt</span>
+                </div>
+                <div id="terminalInfo">Bereit für SSH-Verbindung</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- xterm.js JavaScript -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/addons/xterm-addon-fit/xterm-addon-fit.min.js"></script>
     <script>
         // Sample Data (später aus API)
         const sampleData = {
@@ -601,6 +744,12 @@
         let currentFilter = 'all';
         let searchTerm = '';
         let expandedCards = new Set();
+
+        // Terminal State
+        let terminal = null;
+        let fitAddon = null;
+        let socket = null;
+        let currentServer = null;
 
         // Tab Switching
         document.querySelectorAll('.tab').forEach(tab => {
@@ -815,11 +964,188 @@
         function copySSHCommand(serverId) {
             const server = sampleData.servers.find(s => s.id === serverId);
             if (server) {
-                const sshCommand = `ssh ${server.access.ssh_user}@${server.host}`;
-                copyToClipboard(sshCommand);
-                showToast(`SSH-Befehl kopiert: ${sshCommand}`);
+                // Zeige Auswahlmöglichkeiten: Kopieren oder Terminal öffnen
+                const choice = confirm(`SSH zu ${server.name}:\n\nOK = Terminal öffnen\nAbbrechen = SSH-Befehl kopieren`);
+                
+                if (choice) {
+                    openSSHTerminal(server);
+                } else {
+                    const sshCommand = `ssh ${server.access.ssh_user}@${server.host}`;
+                    copyToClipboard(sshCommand);
+                    showToast(`SSH-Befehl kopiert: ${sshCommand}`);
+                }
             }
         }
+
+        // Terminal Functions
+        function openSSHTerminal(server) {
+            currentServer = server;
+            
+            // Initialize terminal if not exists
+            if (!terminal) {
+                initializeTerminal();
+            }
+            
+            // Show modal
+            document.getElementById('terminalModal').style.display = 'flex';
+            document.getElementById('terminalTitle').textContent = `SSH - ${server.name} (${server.host})`;
+            
+            // Fit terminal to container
+            setTimeout(() => {
+                if (fitAddon) {
+                    fitAddon.fit();
+                }
+                connectSSH(server);
+            }, 100);
+        }
+
+        function initializeTerminal() {
+            // Create terminal instance
+            terminal = new Terminal({
+                cursorBlink: true,
+                fontSize: 14,
+                fontFamily: '"Cascadia Code", "Fira Code", "DejaVu Sans Mono", monospace',
+                theme: {
+                    background: '#1e1e1e',
+                    foreground: '#d4d4d4',
+                    cursor: '#ffffff',
+                    selection: '#264f78',
+                    black: '#000000',
+                    red: '#cd3131',
+                    green: '#0dbc79',
+                    yellow: '#e5e510',
+                    blue: '#2472c8',
+                    magenta: '#bc3fbc',
+                    cyan: '#11a8cd',
+                    white: '#e5e5e5',
+                    brightBlack: '#666666',
+                    brightRed: '#f14c4c',
+                    brightGreen: '#23d18b',
+                    brightYellow: '#f5f543',
+                    brightBlue: '#3b8eea',
+                    brightMagenta: '#d670d6',
+                    brightCyan: '#29b8db',
+                    brightWhite: '#e5e5e5'
+                }
+            });
+
+            // Add fit addon
+            fitAddon = new FitAddon.FitAddon();
+            terminal.loadAddon(fitAddon);
+
+            // Open terminal in container
+            terminal.open(document.getElementById('terminal'));
+            
+            // Welcome message
+            terminal.writeln('\x1b[1;36m╔══════════════════════════════════════╗\x1b[0m');
+            terminal.writeln('\x1b[1;36m║        HomeLab SSH Terminal          ║\x1b[0m');
+            terminal.writeln('\x1b[1;36m╚══════════════════════════════════════╝\x1b[0m');
+            terminal.writeln('');
+            terminal.writeln('\x1b[33mBereit für SSH-Verbindung...\x1b[0m');
+        }
+
+        function connectSSH(server) {
+            updateConnectionStatus('connecting', 'Verbinde...');
+            
+            // Create WebSocket connection to backend
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/ssh`;
+            
+            socket = new WebSocket(wsUrl);
+            
+            socket.onopen = function() {
+                updateConnectionStatus('connected', 'Verbunden');
+                
+                // Send SSH connection request
+                socket.send(JSON.stringify({
+                    action: 'connect',
+                    host: server.host,
+                    username: server.access.ssh_user,
+                    port: 22
+                }));
+                
+                terminal.writeln(`\x1b[32mVerbinde zu ${server.access.ssh_user}@${server.host}...\x1b[0m`);
+            };
+            
+            socket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                
+                switch(data.type) {
+                    case 'output':
+                        terminal.write(data.data);
+                        break;
+                    case 'connected':
+                        terminal.writeln('\x1b[32mSSH-Verbindung erfolgreich!\x1b[0m');
+                        document.getElementById('terminalInfo').textContent = `Verbunden mit ${server.name}`;
+                        break;
+                    case 'error':
+                        terminal.writeln(`\x1b[31mFehler: ${data.message}\x1b[0m`);
+                        updateConnectionStatus('disconnected', 'Fehler');
+                        break;
+                    case 'disconnected':
+                        terminal.writeln('\x1b[33mVerbindung getrennt.\x1b[0m');
+                        updateConnectionStatus('disconnected', 'Getrennt');
+                        break;
+                }
+            };
+            
+            socket.onerror = function(error) {
+                terminal.writeln('\x1b[31mWebSocket-Fehler: Backend nicht erreichbar\x1b[0m');
+                terminal.writeln('\x1b[33mHinweis: SSH-Terminal benötigt Backend-Integration\x1b[0m');
+                updateConnectionStatus('disconnected', 'Backend fehlt');
+            };
+            
+            socket.onclose = function() {
+                updateConnectionStatus('disconnected', 'Getrennt');
+                document.getElementById('terminalInfo').textContent = 'Verbindung geschlossen';
+            };
+            
+            // Handle terminal input
+            terminal.onData(function(data) {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        action: 'input',
+                        data: data
+                    }));
+                }
+            });
+        }
+
+        function updateConnectionStatus(status, text) {
+            const statusDot = document.getElementById('connectionStatus');
+            const statusText = document.getElementById('connectionText');
+            
+            statusDot.className = `status-dot ${status}`;
+            statusText.textContent = text;
+        }
+
+        function clearTerminal() {
+            if (terminal) {
+                terminal.clear();
+            }
+        }
+
+        function disconnectSSH() {
+            if (socket) {
+                socket.close();
+            }
+            updateConnectionStatus('disconnected', 'Getrennt');
+            if (terminal) {
+                terminal.writeln('\x1b[33mVerbindung manuell getrennt.\x1b[0m');
+            }
+        }
+
+        function closeTerminal() {
+            disconnectSSH();
+            document.getElementById('terminalModal').style.display = 'none';
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', function() {
+            if (fitAddon && document.getElementById('terminalModal').style.display === 'flex') {
+                setTimeout(() => fitAddon.fit(), 100);
+            }
+        });
 
         function copyToClipboard(text) {
             navigator.clipboard.writeText(text).then(() => {
@@ -872,6 +1198,20 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             renderServers();
+            
+            // ESC key to close terminal
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && document.getElementById('terminalModal').style.display === 'flex') {
+                    closeTerminal();
+                }
+            });
+            
+            // Click outside modal to close
+            document.getElementById('terminalModal').addEventListener('click', function(e) {
+                if (e.target === this) {
+                    closeTerminal();
+                }
+            });
         });
 
         // Add simple animations
