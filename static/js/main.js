@@ -1,8 +1,9 @@
 // Main Dashboard Application
 class HomelabDashboard {
     constructor() {
-        this.serverData = null;
+        this.dashboardData = null;
         this.currentFilter = 'all';
+        this.currentServiceFilter = 'all';
         this.searchTerm = '';
         this.expandedCards = new Set();
         this.refreshInterval = null;
@@ -22,17 +23,18 @@ class HomelabDashboard {
         }
         Utils.debugLog('✅ WebSocket unterstützt');
         
-        // Load server configuration
-        await this.loadServerConfig();
+        // Load dashboard configuration
+        await this.loadDashboardData();
         
         // Initialize UI
         this.setupEventListeners();
-        this.renderServers();
+        this.renderHosts();
+        this.renderServices();
         
         // Start auto-refresh for ping status
         this.startAutoRefresh();
         
-        Utils.debugLog('✅ Server-Dashboard initialisiert');
+        Utils.debugLog('✅ Dashboard initialisiert');
     }
 
     async checkTerminalSupport() {
@@ -67,43 +69,42 @@ class HomelabDashboard {
         });
     }
 
-    async loadServerConfig() {
+    async loadDashboardData() {
         try {
-            Utils.debugLog('📡 Lade Server-Konfiguration...');
-            const response = await Utils.fetchWithTimeout('/api/servers', {}, 3000);
+            Utils.debugLog('📡 Lade Dashboard-Daten...');
+            const response = await Utils.fetchWithTimeout('/api/dashboard', {}, 3000);
             
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
             
-            this.serverData = await response.json();
-            Utils.debugLog(`✅ ${this.serverData.servers.length} Server geladen`);
+            this.dashboardData = await response.json();
+            Utils.debugLog(`✅ ${this.dashboardData.servers.length} Hosts und ${this.dashboardData.services.length} Services geladen`);
             
         } catch (error) {
-            Utils.debugLog(`❌ Fehler beim Laden der Server-Konfiguration: ${error.message}`);
+            Utils.debugLog(`❌ Fehler beim Laden der Dashboard-Daten: ${error.message}`);
             
-            // Fallback: Use embedded config if API fails
+            // Fallback configuration
             Utils.debugLog('🔄 Verwende Fallback-Konfiguration...');
-            this.serverData = {
-                networks: [
-                    { name: "Intern", subnet: "192.168.1.0/24", color: "#2ecc71" },
-                    { name: "DMZ", subnet: "192.168.7.0/24", color: "#e74c3c" }
+            this.dashboardData = {
+                categories: [
+                    { id: "intern", name: "Intern", subnet: "192.168.1.0/24", color: "#2ecc71" }
                 ],
                 servers: [
                     {
-                        id: "error",
-                        name: "Konfigurationsfehler",
-                        services: "Backend nicht erreichbar",
-                        network: "Intern",
+                        hostname: "Konfigurationsfehler",
+                        description: "Backend nicht erreichbar",
+                        category_id: "intern",
                         host: "127.0.0.1",
-                        dns: ["localhost"],
                         shared: false,
                         access: { ssh: false },
-                        ports: [],
-                        notes: "Server-Konfiguration konnte nicht geladen werden. Backend prüfen.",
-                        status: "offline"
+                        notes: "Dashboard-Konfiguration konnte nicht geladen werden.",
+                        status: "offline",
+                        category: { name: "Intern", color: "#2ecc71" },
+                        services: []
                     }
-                ]
+                ],
+                services: []
             };
         }
     }
@@ -111,9 +112,10 @@ class HomelabDashboard {
     startAutoRefresh() {
         // Refresh every 60 seconds
         this.refreshInterval = setInterval(async () => {
-            Utils.debugLog('🔄 Auto-Refresh: Lade Server-Status...');
-            await this.loadServerConfig();
-            this.renderServers();
+            Utils.debugLog('🔄 Auto-Refresh: Lade Dashboard-Daten...');
+            await this.loadDashboardData();
+            this.renderHosts();
+            this.renderServices();
         }, 60000);
         
         Utils.debugLog('⏰ Auto-Refresh gestartet (60s Intervall)');
@@ -136,10 +138,17 @@ class HomelabDashboard {
             });
         });
 
-        // Filter Tabs
-        document.querySelectorAll('.filter-tab').forEach(filterTab => {
+        // Host Filter Tabs
+        document.querySelectorAll('.filter-tab[data-filter]').forEach(filterTab => {
             filterTab.addEventListener('click', () => {
                 this.setFilter(filterTab.dataset.filter);
+            });
+        });
+
+        // Service Filter Tabs
+        document.querySelectorAll('.filter-tab[data-service-filter]').forEach(filterTab => {
+            filterTab.addEventListener('click', () => {
+                this.setServiceFilter(filterTab.dataset.serviceFilter);
             });
         });
 
@@ -148,14 +157,14 @@ class HomelabDashboard {
         if (searchInput) {
             searchInput.addEventListener('input', (e) => {
                 this.searchTerm = e.target.value.toLowerCase();
-                this.renderServers();
+                this.renderHosts();
+                this.renderServices();
             });
         }
 
         // ESC key handlers
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
-                // Close terminal
                 if (document.getElementById('terminalModal').style.display === 'flex') {
                     window.sshTerminal.closeTerminal();
                 }
@@ -187,17 +196,24 @@ class HomelabDashboard {
     }
 
     setFilter(filter) {
-        document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.filter-tab[data-filter]').forEach(t => t.classList.remove('active'));
         document.querySelector(`[data-filter="${filter}"]`).classList.add('active');
         this.currentFilter = filter;
-        this.renderServers();
+        this.renderHosts();
     }
 
-    filterServers(servers) {
-        return servers.filter(server => {
+    setServiceFilter(filter) {
+        document.querySelectorAll('.filter-tab[data-service-filter]').forEach(t => t.classList.remove('active'));
+        document.querySelector(`[data-service-filter="${filter}"]`).classList.add('active');
+        this.currentServiceFilter = filter;
+        this.renderServices();
+    }
+
+    filterHosts(hosts) {
+        return hosts.filter(host => {
             // Search filter
             if (this.searchTerm) {
-                const searchable = `${server.name} ${server.services} ${server.dns.join(' ')}`.toLowerCase();
+                const searchable = `${host.hostname} ${host.description}`.toLowerCase();
                 if (!searchable.includes(this.searchTerm)) {
                     return false;
                 }
@@ -208,50 +224,70 @@ class HomelabDashboard {
                 case 'all':
                     return true;
                 case 'intern':
-                    return server.network === 'Intern';
+                    return host.category_id === 'intern';
                 case 'dmz':
-                    return server.network === 'DMZ';
+                    return host.category_id === 'dmz';
                 case 'shared':
-                    return server.shared;
+                    return host.shared;
                 case 'ssh':
-                    return server.access.ssh;
+                    return host.access.ssh;
                 default:
                     return true;
             }
         });
     }
 
-    renderServers() {
-        const serverContent = document.getElementById('server-content');
-        if (!serverContent || !this.serverData) return;
+    filterServices(services) {
+        return services.filter(service => {
+            // Search filter
+            if (this.searchTerm) {
+                const searchable = `${service.name} ${service.description} ${service.tags.join(' ')}`.toLowerCase();
+                if (!searchable.includes(this.searchTerm)) {
+                    return false;
+                }
+            }
 
-        const filteredServers = this.filterServers(this.serverData.servers);
+            // Category filter
+            if (this.currentServiceFilter === 'all') {
+                return true;
+            }
+            
+            return service.category === this.currentServiceFilter;
+        });
+    }
+
+    renderHosts() {
+        const serverContent = document.getElementById('server-content');
+        if (!serverContent || !this.dashboardData) return;
+
+        const filteredHosts = this.filterHosts(this.dashboardData.servers);
         
-        if (filteredServers.length === 0) {
+        if (filteredHosts.length === 0) {
             serverContent.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-icon">🔍</div>
-                    <h3>Keine Server gefunden</h3>
+                    <h3>Keine Hosts gefunden</h3>
                     <p>Versuche einen anderen Filter oder Suchbegriff</p>
                 </div>
             `;
             return;
         }
 
-        // Group by network
-        const serversByNetwork = {};
-        filteredServers.forEach(server => {
-            if (!serversByNetwork[server.network]) {
-                serversByNetwork[server.network] = [];
+        // Group by category
+        const hostsByCategory = {};
+        filteredHosts.forEach(host => {
+            const categoryId = host.category_id;
+            if (!hostsByCategory[categoryId]) {
+                hostsByCategory[categoryId] = [];
             }
-            serversByNetwork[server.network].push(server);
+            hostsByCategory[categoryId].push(host);
         });
 
         let html = '';
-        this.serverData.networks.forEach(network => {
-            const networkServers = serversByNetwork[network.name];
-            if (networkServers && networkServers.length > 0) {
-                html += this.renderNetworkSection(network, networkServers);
+        this.dashboardData.categories.forEach(category => {
+            const categoryHosts = hostsByCategory[category.id];
+            if (categoryHosts && categoryHosts.length > 0) {
+                html += this.renderCategorySection(category, categoryHosts);
             }
         });
 
@@ -259,127 +295,182 @@ class HomelabDashboard {
         this.attachEventListeners();
     }
 
-    renderNetworkSection(network, servers) {
+    renderServices() {
+        const servicesGrid = document.getElementById('services-grid');
+        if (!servicesGrid || !this.dashboardData) return;
+
+        const filteredServices = this.filterServices(this.dashboardData.services);
+        
+        if (filteredServices.length === 0) {
+            servicesGrid.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">🔍</div>
+                    <h3>Keine Services gefunden</h3>
+                    <p>Versuche einen anderen Filter oder Suchbegriff</p>
+                </div>
+            `;
+            return;
+        }
+
+        const html = `
+            <div class="services-grid">
+                ${filteredServices.map(service => this.renderServiceCard(service)).join('')}
+            </div>
+        `;
+
+        servicesGrid.innerHTML = html;
+    }
+
+    renderCategorySection(category, hosts) {
         const isCollapsed = false;
         
         return `
             <div class="network-section ${isCollapsed ? 'collapsed' : ''}">
-                <div class="network-header" onclick="dashboard.toggleNetworkSection(this)">
-                    <div class="network-indicator" style="background-color: ${network.color}"></div>
+                <div class="network-header" onclick="dashboard.toggleCategorySection(this)">
+                    <div class="network-indicator" style="background-color: ${category.color}"></div>
                     <div>
-                        <div class="network-title">▼ ${network.name}</div>
-                        <div class="network-subtitle">(${network.subnet}) • ${servers.length} Server</div>
+                        <div class="network-title">▼ ${category.name}</div>
+                        <div class="network-subtitle">(${category.subnet}) • ${hosts.length} Hosts</div>
                     </div>
                     <div class="expand-icon">▼</div>
                 </div>
                 <div class="server-grid">
-                    ${servers.map(server => this.renderServerCard(server)).join('')}
+                    ${hosts.map(host => this.renderHostCard(host)).join('')}
                 </div>
             </div>
         `;
     }
 
-    renderServerCard(server) {
-        const isExpanded = this.expandedCards.has(server.id);
+    renderHostCard(host) {
+        const isExpanded = this.expandedCards.has(host.hostname);
         
         return `
-            <div class="server-card ${isExpanded ? 'expanded' : ''}" data-server-id="${server.id}">
+            <div class="server-card ${isExpanded ? 'expanded' : ''}" data-server-id="${host.hostname}">
                 <div class="server-header">
                     <div class="server-name-container">
-                        <span class="server-name">${server.name}</span>
-                        <span class="server-ip-badge">[${server.host}]</span>
+                        <span class="server-name">${host.hostname}</span>
+                        <span class="server-ip-badge">[${host.host}]</span>
                     </div>
                     <div class="server-indicators">
-                        <div class="status-indicator ${server.status}" title="Status: ${server.status}"></div>
-                        ${server.shared ? '<span class="shared-indicator" title="Shared Server">⚠️</span>' : ''}
+                        <div class="status-indicator ${host.status}" title="Status: ${host.status}"></div>
+                        ${host.shared ? '<span class="shared-indicator" title="Shared Server">⚠️</span>' : ''}
                     </div>
                 </div>
                 
-                <div class="server-services">${server.services}</div>
-                
-                <div class="server-dns">
-                    <a href="https://${server.dns[0]}" target="_blank" class="dns-link">
-                        ${server.dns[0]} ↗
-                    </a>
-                </div>
+                <div class="server-services">${host.description}</div>
                 
                 <div class="server-actions">
-                    ${server.access.ssh ? `<button class="action-btn ssh" onclick="dashboard.openSSH('${server.id}')">SSH</button>` : ''}
-                    <button class="action-btn" onclick="dashboard.toggleServerCard('${server.id}')">${isExpanded ? 'Collapse ▲' : 'Expand ▼'}</button>
+                    ${host.access.ssh ? `<button class="action-btn ssh" onclick="dashboard.openSSH('${host.hostname}')">SSH</button>` : ''}
+                    <button class="action-btn" onclick="dashboard.toggleHostCard('${host.hostname}')">${isExpanded ? 'Collapse ▲' : 'Expand ▼'}</button>
                 </div>
                 
-                ${isExpanded ? this.renderServerDetails(server) : ''}
+                ${isExpanded ? this.renderHostDetails(host) : ''}
             </div>
         `;
     }
 
-    renderServerDetails(server) {
+    renderHostDetails(host) {
         return `
             <div class="server-details">
-                <div class="detail-section">
-                    <div class="detail-title">DNS:</div>
-                    <ul class="detail-list">
-                        ${server.dns.map(dns => `
-                            <li class="detail-item">
-                                • <a href="https://${dns}" target="_blank" class="dns-link">${dns}</a>
-                            </li>
-                        `).join('')}
-                    </ul>
-                </div>
+                ${host.services.length > 0 ? `
+                    <div class="host-services">
+                        <div class="detail-title">🚀 Services auf diesem Host:</div>
+                        <div class="service-list">
+                            ${host.services.map(service => this.renderServiceItem(service)).join('')}
+                        </div>
+                    </div>
+                ` : ''}
                 
-                <div class="detail-section">
-                    <div class="detail-title">Ports:</div>
-                    <ul class="detail-list">
-                        ${server.ports.map(port => `
-                            <li class="detail-item">
-                                • :${port.number} (${port.service})
-                                <a href="http://${server.host}:${port.number}" target="_blank" class="port-link">↗</a>
-                            </li>
-                        `).join('')}
-                    </ul>
-                </div>
-                
-                <div class="detail-section">
-                    <div class="detail-title">IP:</div>
-                    <div class="server-ip" onclick="Utils.copyToClipboard('${server.host}')">${server.host} 📋</div>
-                </div>
-                
-                ${server.notes ? `
+                ${host.notes ? `
                     <div class="server-notes">
-                        📝 ${server.notes}
+                        📝 ${host.notes}
                     </div>
                 ` : ''}
             </div>
         `;
     }
 
-    toggleNetworkSection(header) {
+    renderServiceItem(service) {
+        return `
+            <div class="service-item">
+                <div class="service-item-favicon">🌐</div>
+                <div class="service-item-info">
+                    <div class="service-item-name">${service.name}</div>
+                    ${service.port ? `<div class="service-item-port">Port ${service.port}</div>` : ''}
+                </div>
+                ${service.url ? `
+                    <a href="${service.url}" target="_blank" class="service-item-link">↗</a>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    renderServiceCard(service) {
+        const host = this.dashboardData.servers.find(s => s.hostname === service.hostname);
+        const hostStatus = host ? host.status : 'unknown';
+            
+        return `
+            <div class="service-card">
+                <div class="service-status-indicator ${hostStatus}"></div>
+                <div class="service-header">
+                    <div class="service-favicon icon">🌐</div>
+                    <div class="service-info">
+                        <div class="service-name">${service.name}</div>
+                        <div class="service-host">${host ? host.hostname : 'Unbekannter Host'}</div>
+                    </div>
+                </div>
+                
+                <div class="service-description">${service.description}</div>
+                
+                ${service.url ? `
+                    <a href="${service.url}" target="_blank" class="service-url">
+                        Service öffnen ↗
+                    </a>
+                ` : ''}
+                
+                ${service.tags.length > 0 ? `
+                    <div class="service-tags">
+                        ${service.tags.map(tag => `<span class="service-tag">${tag}</span>`).join('')}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    toggleCategorySection(header) {
         const section = header.parentElement;
         section.classList.toggle('collapsed');
     }
 
-    toggleServerCard(serverId) {
-        if (this.expandedCards.has(serverId)) {
-            this.expandedCards.delete(serverId);
+    toggleHostCard(hostname) {
+        if (this.expandedCards.has(hostname)) {
+            this.expandedCards.delete(hostname);
         } else {
-            this.expandedCards.add(serverId);
+            this.expandedCards.add(hostname);
         }
-        this.renderServers();
+        this.renderHosts();
     }
 
-    openSSH(serverId) {
-        Utils.debugLog(`🔑 SSH-Button geklickt für Server: ${serverId}`);
+    openSSH(hostname) {
+        Utils.debugLog(`🔑 SSH-Button geklickt für Host: ${hostname}`);
         
-        const server = this.serverData.servers.find(s => s.id === serverId);
-        if (!server) {
-            Utils.debugLog(`❌ Server ${serverId} nicht gefunden!`);
+        const host = this.dashboardData.servers.find(s => s.hostname === hostname);
+        if (!host) {
+            Utils.debugLog(`❌ Host ${hostname} nicht gefunden!`);
             return;
         }
         
-        Utils.debugLog(`✅ Server gefunden: ${server.name} (${server.host})`);
+        Utils.debugLog(`✅ Host gefunden: ${host.hostname} (${host.host})`);
         
-        // SSH-Terminal direkt öffnen (ohne Auth-Modal)
-        window.sshTerminal.openSSHTerminal(server);
+        // Convert to old format for SSH terminal compatibility
+        const legacyServer = {
+            id: host.hostname,
+            name: host.hostname,
+            host: host.host,
+            access: host.access
+        };
+        
+        window.sshTerminal.openSSHTerminal(legacyServer);
     }
 
     attachEventListeners() {

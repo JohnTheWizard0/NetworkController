@@ -56,11 +56,27 @@ if [ ! -d "$APP_DIR/config" ]; then
     mkdir -p "$APP_DIR/config"
 fi
 
-# Check if servers.json exists
-if [ ! -f "$APP_DIR/config/servers.json" ]; then
-    echo -e "${YELLOW}⚠️ config/servers.json nicht gefunden${NC}"
+# Check if config files exist
+config_files=(
+    "config/servers.json"
+    "config/categories.json" 
+    "config/services.json"
+)
+
+missing_configs=()
+for file in "${config_files[@]}"; do
+    if [ ! -f "$APP_DIR/$file" ]; then
+        missing_configs+=("$file")
+    fi
+done
+
+if [ ${#missing_configs[@]} -gt 0 ]; then
+    echo -e "${YELLOW}⚠️ Fehlende Konfigurationsdateien:${NC}"
+    for file in "${missing_configs[@]}"; do
+        echo "   - $file"
+    done
     echo "Das Dashboard wird mit Fallback-Konfiguration starten."
-    echo "Erstelle config/servers.json für deine Server-Konfiguration."
+    echo "Erstelle die fehlenden JSON-Dateien für vollständige Funktionalität."
 fi
 
 # Create static directories if they don't exist

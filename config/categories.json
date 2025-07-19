@@ -1,0 +1,25 @@
+{
+  "categories": [
+    {
+      "id": "intern",
+      "name": "Intern",
+      "subnet": "192.168.1.0/24",
+      "color": "#2ecc71",
+      "description": "Interne Netzwerk-Segmente"
+    },
+    {
+      "id": "dmz",
+      "name": "DMZ",
+      "subnet": "192.168.7.0/24", 
+      "color": "#e74c3c",
+      "description": "Demilitarisierte Zone"
+    },
+    {
+      "id": "management",
+      "name": "Management",
+      "subnet": "192.168.100.0/24",
+      "color": "#9b59b6",
+      "description": "Management und Monitoring"
+    }
+  ]
+}

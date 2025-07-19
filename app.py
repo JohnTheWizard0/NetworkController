@@ -58,7 +58,7 @@ class SSHConnection:
                 '-o', 'LogLevel=INFO',
                 '-o', 'PubkeyAuthentication=no',
                 '-o', 'PasswordAuthentication=yes',
-                '-o', 'KbdInteractiveAuthentication=yes',  # Correct option name
+                '-o', 'KbdInteractiveAuthentication=yes',
                 '-o', 'PreferredAuthentications=keyboard-interactive,password',
                 '-o', 'NumberOfPasswordPrompts=3',
                 '-o', 'ConnectTimeout=10'
@@ -72,7 +72,7 @@ class SSHConnection:
                 stdin=self.slave_fd,
                 stdout=self.slave_fd,
                 stderr=self.slave_fd,
-                preexec_fn=os.setsid  # Create new session
+                preexec_fn=os.setsid
             )
             
             # Close slave fd in parent (SSH process keeps it open)
@@ -133,18 +133,16 @@ class SSHConnection:
                                         self.loop
                                     )
                             else:
-                                # No data, might be EOF
                                 time.sleep(0.01)
                                 
                         except OSError as e:
-                            if e.errno == 5:  # Input/output error (PTY closed)
+                            if e.errno == 5:
                                 print("🔌 PTY geschlossen")
                                 break
                             else:
                                 print(f"❌ PTY Read-Fehler: {e}")
                                 time.sleep(0.1)
                     else:
-                        # No data available
                         time.sleep(0.01)
                         
                 except Exception as read_error:
@@ -155,7 +153,6 @@ class SSHConnection:
             print(f"❌ SSH PTY Output-Thread Fehler: {e}")
         finally:
             print(f"🔄 PTY Output-Thread beendet")
-            # Verbindung verloren melden
             if self.loop:
                 asyncio.run_coroutine_threadsafe(
                     self.websocket.send_text(json.dumps({
@@ -170,10 +167,7 @@ class SSHConnection:
         if self.connected and self.master_fd is not None:
             try:
                 print(f"📤 SSH PTY Input: {repr(data)}")
-                
-                # Write to PTY master
                 os.write(self.master_fd, data.encode('utf-8'))
-                
             except Exception as e:
                 print(f"❌ SSH PTY Input-Fehler: {e}")
                 await self.websocket.send_text(json.dumps({
@@ -186,7 +180,6 @@ class SSHConnection:
         print(f"🔌 SSH-PTY-Verbindung schließen")
         self.connected = False
         
-        # Close PTY master
         if self.master_fd is not None:
             try:
                 os.close(self.master_fd)
@@ -194,7 +187,6 @@ class SSHConnection:
                 pass
             self.master_fd = None
         
-        # Close slave if still open
         if self.slave_fd is not None:
             try:
                 os.close(self.slave_fd)
@@ -202,23 +194,17 @@ class SSHConnection:
                 pass
             self.slave_fd = None
         
-        # Terminate SSH process
         if self.ssh_process:
             try:
-                # Send SIGTERM to process group
                 os.killpg(os.getpgid(self.ssh_process.pid), signal.SIGTERM)
-                
-                # Wait for termination
                 try:
                     self.ssh_process.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     print("🔫 SSH-Prozess forciert beenden")
                     os.killpg(os.getpgid(self.ssh_process.pid), signal.SIGKILL)
                     self.ssh_process.wait()
-                    
             except Exception as e:
                 print(f"❌ Fehler beim Schließen: {e}")
-            
             self.ssh_process = None
 
 
@@ -243,16 +229,14 @@ class PingChecker:
         while self.running:
             for server in servers:
                 host = server.get('host')
-                if host:
-                    self.ping_results[server['id']] = self._ping_host(host)
-            
-            # Warte 30 Sekunden zwischen Ping-Runden
+                hostname = server.get('hostname')
+                if host and hostname:
+                    self.ping_results[hostname] = self._ping_host(host)
             time.sleep(30)
     
     def _ping_host(self, host):
         """Einzelnen Host pingen"""
         try:
-            # Ping-Befehl für Linux/Unix
             result = subprocess.run(
                 ['ping', '-c', '1', '-W', '2', host],
                 capture_output=True,
@@ -286,56 +270,117 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # In-Memory Connection Store
 connections: Dict[str, SSHConnection] = {}
 
-# Server Configuration Cache
-server_config_cache = None
-config_file_path = Path("config/servers.json")
+# Configuration Cache
+config_cache = {
+    'servers': None,
+    'categories': None,
+    'services': None
+}
+
+config_paths = {
+    'servers': Path("config/servers.json"),
+    'categories': Path("config/categories.json"),
+    'services': Path("config/services.json")
+}
 
 # Ping Checker
 ping_checker = PingChecker()
 
 
-def load_server_config():
-    """Server-Konfiguration aus JSON-Datei laden"""
-    global server_config_cache
-    
+def load_config_file(config_type: str):
+    """Lade eine einzelne Konfigurationsdatei"""
     try:
-        if config_file_path.exists():
-            with open(config_file_path, 'r', encoding='utf-8') as f:
-                server_config_cache = json.load(f)
-                print(f"✅ Server-Konfiguration geladen: {len(server_config_cache.get('servers', []))} Server")
-                
-                # Ping-Monitoring für alle Server starten
-                ping_checker.start_ping_monitoring(server_config_cache.get('servers', []))
-                
+        config_path = config_paths[config_type]
+        if config_path.exists():
+            with open(config_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                print(f"✅ {config_type}.json geladen")
+                return data
         else:
-            print(f"⚠️ Konfigurationsdatei nicht gefunden: {config_file_path}")
-            # Fallback-Konfiguration
-            server_config_cache = {
-                "networks": [
-                    {"name": "Intern", "subnet": "192.168.1.0/24", "color": "#2ecc71"}
-                ],
-                "servers": [
-                    {
-                        "id": "config-missing",
-                        "name": "Konfiguration fehlt",
-                        "services": "config/servers.json erstellen",
-                        "network": "Intern",
-                        "host": "127.0.0.1",
-                        "dns": ["localhost"],
-                        "shared": false,
-                        "access": {"ssh": false},
-                        "ports": [],
-                        "notes": f"Erstelle {config_file_path} mit Server-Konfiguration",
-                        "status": "online"
-                    }
-                ]
-            }
+            print(f"⚠️ {config_path} nicht gefunden")
+            return get_fallback_config(config_type)
             
     except Exception as e:
-        print(f"❌ Fehler beim Laden der Server-Konfiguration: {e}")
-        server_config_cache = {"networks": [], "servers": []}
+        print(f"❌ Fehler beim Laden von {config_type}.json: {e}")
+        return get_fallback_config(config_type)
+
+
+def get_fallback_config(config_type: str):
+    """Fallback-Konfigurationen"""
+    fallbacks = {
+        'categories': {
+            "categories": [
+                {"id": "intern", "name": "Intern", "subnet": "192.168.1.0/24", "color": "#2ecc71"}
+            ]
+        },
+        'services': {
+            "services": []
+        },
+        'servers': {
+            "servers": [
+                {
+                    "hostname": "Konfiguration fehlt",
+                    "description": f"config/{config_type}.json erstellen",
+                    "category_id": "intern",
+                    "host": "127.0.0.1",
+                    "shared": false,
+                    "access": {"ssh": false},
+                    "notes": f"Erstelle config/{config_type}.json",
+                    "status": "offline"
+                }
+            ]
+        }
+    }
+    return fallbacks.get(config_type, {})
+
+
+def load_all_configs():
+    """Lade alle Konfigurationsdateien"""
+    for config_type in config_cache.keys():
+        config_cache[config_type] = load_config_file(config_type)
     
-    return server_config_cache
+    # Ping-Monitoring für Server starten
+    if config_cache['servers']:
+        servers = config_cache['servers'].get('servers', [])
+        ping_checker.start_ping_monitoring(servers)
+
+
+def enrich_data():
+    """Verknüpfe Services mit Hosts und Kategorien"""
+    if not all(config_cache.values()):
+        return None
+    
+    # Kategorien als Dict für schnellen Lookup
+    categories_dict = {cat['id']: cat for cat in config_cache['categories']['categories']}
+    
+    # Services gruppiert nach hostname
+    services_by_hostname = {}
+    for service in config_cache['services']['services']:
+        hostname = service['hostname']
+        if hostname not in services_by_hostname:
+            services_by_hostname[hostname] = []
+        services_by_hostname[hostname].append(service)
+    
+    # Server anreichern
+    enriched_servers = []
+    for server in config_cache['servers']['servers']:
+        # Ping-Status hinzufügen (hostname als ID verwenden)
+        server['status'] = ping_checker.get_status(server['hostname'])
+        
+        # Kategorie-Informationen hinzufügen
+        category = categories_dict.get(server['category_id'], {})
+        server['category'] = category
+        
+        # Services hinzufügen
+        server['services'] = services_by_hostname.get(server['hostname'], [])
+        
+        enriched_servers.append(server)
+    
+    return {
+        'servers': enriched_servers,
+        'categories': config_cache['categories']['categories'],
+        'services': config_cache['services']['services']
+    }
 
 
 @app.get("/")
@@ -350,18 +395,40 @@ async def health_check():
     return {"status": "ok", "message": "HomeLab Dashboard is running"}
 
 
+@app.get("/api/dashboard")
+async def get_dashboard_data():
+    """Vollständige Dashboard-Daten mit verknüpften Services"""
+    load_all_configs()
+    enriched_data = enrich_data()
+    
+    if not enriched_data:
+        raise HTTPException(status_code=500, detail="Configuration could not be loaded")
+    
+    return enriched_data
+
+
 @app.get("/api/servers")
 async def get_servers():
-    """Server-Konfiguration mit Live-Ping-Status über API bereitstellen"""
-    config = load_server_config()
-    if not config:
-        raise HTTPException(status_code=500, detail="Server configuration could not be loaded")
-    
-    # Live-Ping-Status setzen
-    for server in config['servers']:
-        server['status'] = ping_checker.get_status(server['id'])
-    
-    return config
+    """Server-Konfiguration (Legacy-Endpoint für Kompatibilität)"""
+    dashboard_data = await get_dashboard_data()
+    return {
+        'networks': dashboard_data['categories'],  # Backward compatibility
+        'servers': dashboard_data['servers']
+    }
+
+
+@app.get("/api/categories")
+async def get_categories():
+    """Kategorien-Konfiguration"""
+    config_cache['categories'] = load_config_file('categories')
+    return config_cache['categories']
+
+
+@app.get("/api/services")
+async def get_services():
+    """Services-Konfiguration"""
+    config_cache['services'] = load_config_file('services')
+    return config_cache['services']
 
 
 @app.websocket("/ws/ssh")
@@ -376,7 +443,6 @@ async def ssh_websocket(websocket: WebSocket):
     
     try:
         while True:
-            # WebSocket Message empfangen
             data = await websocket.receive_text()
             message = json.loads(data)
             
@@ -384,10 +450,9 @@ async def ssh_websocket(websocket: WebSocket):
             print(f"📨 WebSocket Action: {action}")
             
             if action == 'connect':
-                # SSH-Verbindung starten
                 host = message.get('host')
                 port = message.get('port', 22)
-                username = message.get('username')  # Get username from frontend
+                username = message.get('username')
                 
                 print(f"📡 SSH-Verbindung starten für: {username}@{host}:{port}")
                 
@@ -401,12 +466,10 @@ async def ssh_websocket(websocket: WebSocket):
                 await ssh_conn.connect(host, port, username)
                 
             elif action == 'input':
-                # Input an SSH weiterleiten
                 input_data = message.get('data')
                 await ssh_conn.send_input(input_data)
                 
             elif action == 'disconnect':
-                # SSH-Verbindung trennen
                 ssh_conn.disconnect()
                 break
                 
@@ -415,7 +478,6 @@ async def ssh_websocket(websocket: WebSocket):
     except Exception as e:
         print(f"❌ SSH WebSocket Fehler: {e}")
     finally:
-        # Cleanup
         ssh_conn.disconnect()
         if connection_id in connections:
             del connections[connection_id]
@@ -427,13 +489,13 @@ if __name__ == "__main__":
     print("=" * 50)
     print(f"Frontend: http://localhost:8000/")
     print(f"Health: http://localhost:8000/health")
-    print(f"API: http://localhost:8000/api/servers")
+    print(f"API Dashboard: http://localhost:8000/api/dashboard")
+    print(f"API Legacy: http://localhost:8000/api/servers")
     print(f"WebSocket: ws://localhost:8000/ws/ssh")
-    print(f"Config: {config_file_path.absolute()}")
     print("=" * 50)
     
     # Config beim Start laden
-    load_server_config()
+    load_all_configs()
     
     try:
         uvicorn.run(
@@ -443,6 +505,5 @@ if __name__ == "__main__":
             log_level="info"
         )
     finally:
-        # Cleanup beim Beenden
         ping_checker.stop()
         print("🧹 Backend sauber beendet")
