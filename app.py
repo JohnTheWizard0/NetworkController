@@ -127,7 +127,7 @@ class SSHConnection:
 app = FastAPI(title="HomeLab Dashboard")
 
 # Static Files (dein Frontend)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/var/www/NetworkController/static", StaticFiles(directory="static"), name="static")
 
 # In-Memory Connection Store
 connections: Dict[str, SSHConnection] = {}
