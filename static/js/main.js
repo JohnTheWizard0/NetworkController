@@ -5,6 +5,7 @@ class HomelabDashboard {
         this.currentFilter = 'all';
         this.searchTerm = '';
         this.expandedCards = new Set();
+        this.refreshInterval = null;
     }
 
     async initialize() {
@@ -27,6 +28,9 @@ class HomelabDashboard {
         // Initialize UI
         this.setupEventListeners();
         this.renderServers();
+        
+        // Start auto-refresh for ping status
+        this.startAutoRefresh();
         
         Utils.debugLog('✅ Server-Dashboard initialisiert');
     }
@@ -104,6 +108,25 @@ class HomelabDashboard {
         }
     }
 
+    startAutoRefresh() {
+        // Refresh every 60 seconds
+        this.refreshInterval = setInterval(async () => {
+            Utils.debugLog('🔄 Auto-Refresh: Lade Server-Status...');
+            await this.loadServerConfig();
+            this.renderServers();
+        }, 60000);
+        
+        Utils.debugLog('⏰ Auto-Refresh gestartet (60s Intervall)');
+    }
+
+    stopAutoRefresh() {
+        if (this.refreshInterval) {
+            clearInterval(this.refreshInterval);
+            this.refreshInterval = null;
+            Utils.debugLog('⏰ Auto-Refresh gestoppt');
+        }
+    }
+
     setupEventListeners() {
         // Tab Switching
         document.querySelectorAll('.tab').forEach(tab => {
@@ -132,13 +155,6 @@ class HomelabDashboard {
         // ESC key handlers
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
-                // Close any open modals
-                document.querySelectorAll('.modal').forEach(modal => {
-                    if (modal.style.display === 'flex') {
-                        modal.style.display = 'none';
-                    }
-                });
-                
                 // Close terminal
                 if (document.getElementById('terminalModal').style.display === 'flex') {
                     window.sshTerminal.closeTerminal();
@@ -147,12 +163,10 @@ class HomelabDashboard {
         });
 
         // Click outside modal to close
-        document.querySelectorAll('.modal').forEach(modal => {
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) {
-                    modal.style.display = 'none';
-                }
-            });
+        document.getElementById('terminalModal').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('terminalModal')) {
+                window.sshTerminal.closeTerminal();
+            }
         });
     }
 
@@ -271,7 +285,10 @@ class HomelabDashboard {
         return `
             <div class="server-card ${isExpanded ? 'expanded' : ''}" data-server-id="${server.id}">
                 <div class="server-header">
-                    <div class="server-name">${server.name} <span class="server-ip-inline">[${server.host}]</span></div>
+                    <div class="server-name-container">
+                        <span class="server-name">${server.name}</span>
+                        <span class="server-ip-badge">[${server.host}]</span>
+                    </div>
                     <div class="server-indicators">
                         <div class="status-indicator ${server.status}" title="Status: ${server.status}"></div>
                         ${server.shared ? '<span class="shared-indicator" title="Shared Server">⚠️</span>' : ''}
@@ -361,7 +378,7 @@ class HomelabDashboard {
         
         Utils.debugLog(`✅ Server gefunden: ${server.name} (${server.host})`);
         
-        // SSH-Terminal öffnen
+        // SSH-Terminal direkt öffnen (ohne Auth-Modal)
         window.sshTerminal.openSSHTerminal(server);
     }
 

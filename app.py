@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 HomeLab Dashboard SSH Backend
-FastAPI + WebSocket + Paramiko SSH Terminal (Simplified)
+FastAPI + WebSocket + Simple subprocess SSH
 """
 
 import asyncio
@@ -9,10 +9,13 @@ import json
 import subprocess
 import threading
 import time
+import os
+import pty
+import select
+import signal
 from pathlib import Path
 from typing import Dict, Optional
 
-import paramiko
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
@@ -22,68 +25,72 @@ import uvicorn
 class SSHConnection:
     def __init__(self, websocket: WebSocket):
         self.websocket = websocket
-        self.ssh_client: Optional[paramiko.SSHClient] = None
-        self.ssh_channel: Optional[paramiko.Channel] = None
+        self.ssh_process: Optional[subprocess.Popen] = None
+        self.master_fd: Optional[int] = None
+        self.slave_fd: Optional[int] = None
         self.connected = False
         self.output_thread: Optional[threading.Thread] = None
+        self.loop = None
 
-    async def connect(self, host: str, username: str, port: int = 22, password: str = None):
-        """Standard SSH-Verbindung mit Anmeldedaten"""
+    async def connect(self, host: str, port: int = 22, username: str = None):
+        """SSH-Verbindung mit echtem PTY"""
         try:
-            self.ssh_client = paramiko.SSHClient()
-            self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            print(f"🔌 SSH-Verbindung mit PTY zu {username}@{host}:{port}")
             
-            print(f"🔌 SSH-Verbindung zu {username}@{host}:{port}")
+            # Store event loop for thread communication
+            self.loop = asyncio.get_event_loop()
             
-            # Verbindungsparameter
-            connect_kwargs = {
-                'hostname': host,
-                'port': port,
-                'username': username,
-                'timeout': 10
-            }
+            # Create a real PTY
+            self.master_fd, self.slave_fd = pty.openpty()
             
-            if password:
-                connect_kwargs['password'] = password
+            # SSH-Befehl
+            if username:
+                ssh_target = f"{username}@{host}"
+            else:
+                ssh_target = host
+                
+            ssh_cmd = [
+                'ssh',
+                ssh_target,
+                '-p', str(port),
+                '-o', 'StrictHostKeyChecking=no',
+                '-o', 'UserKnownHostsFile=/dev/null',
+                '-o', 'LogLevel=INFO',
+                '-o', 'PubkeyAuthentication=no',
+                '-o', 'PasswordAuthentication=yes',
+                '-o', 'KbdInteractiveAuthentication=yes',  # Correct option name
+                '-o', 'PreferredAuthentications=keyboard-interactive,password',
+                '-o', 'NumberOfPasswordPrompts=3',
+                '-o', 'ConnectTimeout=10'
+            ]
             
-            # Verbinden
-            self.ssh_client.connect(**connect_kwargs)
+            print(f"🔧 SSH-Befehl mit PTY: {' '.join(ssh_cmd)}")
             
-            # Interactive Shell öffnen
-            self.ssh_channel = self.ssh_client.invoke_shell(
-                term='xterm-256color',
-                width=120,
-                height=30
+            # Starte SSH-Prozess mit PTY
+            self.ssh_process = subprocess.Popen(
+                ssh_cmd,
+                stdin=self.slave_fd,
+                stdout=self.slave_fd,
+                stderr=self.slave_fd,
+                preexec_fn=os.setsid  # Create new session
             )
+            
+            # Close slave fd in parent (SSH process keeps it open)
+            os.close(self.slave_fd)
+            self.slave_fd = None
             
             self.connected = True
             
             await self.websocket.send_text(json.dumps({
                 'type': 'connected',
-                'message': f'SSH connected to {username}@{host}'
+                'message': f'SSH PTY started for {ssh_target}'
             }))
             
             # Output-Thread starten
             self.output_thread = threading.Thread(target=self._read_ssh_output, daemon=True)
             self.output_thread.start()
             
-            print(f"✅ SSH-Verbindung erfolgreich zu {username}@{host}")
-            
-        except paramiko.AuthenticationException as e:
-            error_msg = f"SSH Authentifizierung fehlgeschlagen: {str(e)}"
-            print(f"❌ {error_msg}")
-            await self.websocket.send_text(json.dumps({
-                'type': 'error',
-                'message': 'Authentication failed: Invalid username or password'
-            }))
-            
-        except paramiko.SSHException as e:
-            error_msg = f"SSH-Fehler: {str(e)}"
-            print(f"❌ {error_msg}")
-            await self.websocket.send_text(json.dumps({
-                'type': 'error',
-                'message': f'SSH error: {str(e)}'
-            }))
+            print(f"✅ SSH-PTY gestartet für {ssh_target}")
             
         except Exception as e:
             error_msg = f"SSH-Verbindung fehlgeschlagen: {str(e)}"
@@ -94,63 +101,180 @@ class SSHConnection:
             }))
 
     def _read_ssh_output(self):
-        """SSH-Output lesen und an WebSocket weiterleiten"""
+        """SSH-Output vom PTY lesen"""
         try:
-            while self.connected and self.ssh_channel:
-                if self.ssh_channel.recv_ready():
-                    data = self.ssh_channel.recv(1024).decode('utf-8', errors='ignore')
-                    if data:
-                        # Async send von sync Thread
-                        asyncio.run_coroutine_threadsafe(
-                            self.websocket.send_text(json.dumps({
-                                'type': 'output',
-                                'data': data
-                            })),
-                            asyncio.get_event_loop()
-                        )
-                else:
-                    # Kurz warten wenn keine Daten
-                    time.sleep(0.01)
+            print(f"🔄 PTY Output-Thread gestartet")
+            
+            while self.connected and self.master_fd is not None:
+                try:
+                    # Check if process is still alive
+                    if self.ssh_process and self.ssh_process.poll() is not None:
+                        print(f"🔌 SSH-Prozess beendet mit Code: {self.ssh_process.returncode}")
+                        break
+                    
+                    # Use select to check for available data
+                    ready, _, _ = select.select([self.master_fd], [], [], 0.1)
+                    
+                    if ready:
+                        try:
+                            # Read from PTY
+                            data = os.read(self.master_fd, 1024)
+                            if data:
+                                # Decode and send
+                                text = data.decode('utf-8', errors='replace')
+                                print(f"📥 SSH PTY Output: {repr(text[:100])}")
+                                
+                                if self.loop:
+                                    asyncio.run_coroutine_threadsafe(
+                                        self.websocket.send_text(json.dumps({
+                                            'type': 'output',
+                                            'data': text
+                                        })),
+                                        self.loop
+                                    )
+                            else:
+                                # No data, might be EOF
+                                time.sleep(0.01)
+                                
+                        except OSError as e:
+                            if e.errno == 5:  # Input/output error (PTY closed)
+                                print("🔌 PTY geschlossen")
+                                break
+                            else:
+                                print(f"❌ PTY Read-Fehler: {e}")
+                                time.sleep(0.1)
+                    else:
+                        # No data available
+                        time.sleep(0.01)
+                        
+                except Exception as read_error:
+                    print(f"❌ PTY Read-Fehler: {read_error}")
+                    time.sleep(0.1)
                     
         except Exception as e:
-            print(f"❌ SSH Output-Thread Fehler: {e}")
-            # Verbindung verloren
-            asyncio.run_coroutine_threadsafe(
-                self.websocket.send_text(json.dumps({
-                    'type': 'disconnected',
-                    'message': f'SSH connection lost: {str(e)}'
-                })),
-                asyncio.get_event_loop()
-            )
+            print(f"❌ SSH PTY Output-Thread Fehler: {e}")
+        finally:
+            print(f"🔄 PTY Output-Thread beendet")
+            # Verbindung verloren melden
+            if self.loop:
+                asyncio.run_coroutine_threadsafe(
+                    self.websocket.send_text(json.dumps({
+                        'type': 'disconnected',
+                        'message': 'SSH PTY session ended'
+                    })),
+                    self.loop
+                )
 
     async def send_input(self, data: str):
-        """Input an SSH-Channel senden"""
-        if self.connected and self.ssh_channel:
+        """Input an SSH-PTY senden"""
+        if self.connected and self.master_fd is not None:
             try:
-                self.ssh_channel.send(data)
+                print(f"📤 SSH PTY Input: {repr(data)}")
+                
+                # Write to PTY master
+                os.write(self.master_fd, data.encode('utf-8'))
+                
             except Exception as e:
-                print(f"❌ SSH Input-Fehler: {e}")
+                print(f"❌ SSH PTY Input-Fehler: {e}")
                 await self.websocket.send_text(json.dumps({
                     'type': 'error',
                     'message': f'Failed to send input: {str(e)}'
                 }))
 
     def disconnect(self):
-        """SSH-Verbindung schließen"""
-        print(f"🔌 SSH-Verbindung schließen")
+        """SSH-PTY-Verbindung schließen"""
+        print(f"🔌 SSH-PTY-Verbindung schließen")
         self.connected = False
         
-        if self.ssh_channel:
+        # Close PTY master
+        if self.master_fd is not None:
             try:
-                self.ssh_channel.close()
+                os.close(self.master_fd)
             except:
                 pass
+            self.master_fd = None
         
-        if self.ssh_client:
+        # Close slave if still open
+        if self.slave_fd is not None:
             try:
-                self.ssh_client.close()
+                os.close(self.slave_fd)
             except:
                 pass
+            self.slave_fd = None
+        
+        # Terminate SSH process
+        if self.ssh_process:
+            try:
+                # Send SIGTERM to process group
+                os.killpg(os.getpgid(self.ssh_process.pid), signal.SIGTERM)
+                
+                # Wait for termination
+                try:
+                    self.ssh_process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    print("🔫 SSH-Prozess forciert beenden")
+                    os.killpg(os.getpgid(self.ssh_process.pid), signal.SIGKILL)
+                    self.ssh_process.wait()
+                    
+            except Exception as e:
+                print(f"❌ Fehler beim Schließen: {e}")
+            
+            self.ssh_process = None
+
+
+class PingChecker:
+    def __init__(self):
+        self.ping_results = {}
+        self.ping_thread = None
+        self.running = False
+        
+    def start_ping_monitoring(self, servers):
+        """Startet kontinuierliches Ping-Monitoring"""
+        if self.running:
+            return
+            
+        self.running = True
+        self.ping_thread = threading.Thread(target=self._ping_loop, args=(servers,), daemon=True)
+        self.ping_thread.start()
+        print("✅ Ping-Monitoring gestartet")
+    
+    def _ping_loop(self, servers):
+        """Kontinuierliche Ping-Überwachung"""
+        while self.running:
+            for server in servers:
+                host = server.get('host')
+                if host:
+                    self.ping_results[server['id']] = self._ping_host(host)
+            
+            # Warte 30 Sekunden zwischen Ping-Runden
+            time.sleep(30)
+    
+    def _ping_host(self, host):
+        """Einzelnen Host pingen"""
+        try:
+            # Ping-Befehl für Linux/Unix
+            result = subprocess.run(
+                ['ping', '-c', '1', '-W', '2', host],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            success = result.returncode == 0
+            print(f"🏓 Ping {host}: {'✅' if success else '❌'}")
+            return 'online' if success else 'offline'
+            
+        except Exception as e:
+            print(f"❌ Ping-Fehler für {host}: {e}")
+            return 'offline'
+    
+    def get_status(self, server_id):
+        """Status für einen Server abrufen"""
+        return self.ping_results.get(server_id, 'unknown')
+    
+    def stop(self):
+        """Ping-Monitoring stoppen"""
+        self.running = False
 
 
 # FastAPI App
@@ -166,6 +290,9 @@ connections: Dict[str, SSHConnection] = {}
 server_config_cache = None
 config_file_path = Path("config/servers.json")
 
+# Ping Checker
+ping_checker = PingChecker()
+
 
 def load_server_config():
     """Server-Konfiguration aus JSON-Datei laden"""
@@ -176,6 +303,10 @@ def load_server_config():
             with open(config_file_path, 'r', encoding='utf-8') as f:
                 server_config_cache = json.load(f)
                 print(f"✅ Server-Konfiguration geladen: {len(server_config_cache.get('servers', []))} Server")
+                
+                # Ping-Monitoring für alle Server starten
+                ping_checker.start_ping_monitoring(server_config_cache.get('servers', []))
+                
         else:
             print(f"⚠️ Konfigurationsdatei nicht gefunden: {config_file_path}")
             # Fallback-Konfiguration
@@ -221,15 +352,14 @@ async def health_check():
 
 @app.get("/api/servers")
 async def get_servers():
-    """Server-Konfiguration über API bereitstellen"""
+    """Server-Konfiguration mit Live-Ping-Status über API bereitstellen"""
     config = load_server_config()
     if not config:
         raise HTTPException(status_code=500, detail="Server configuration could not be loaded")
     
-    # Statische Status-Anzeige (ohne Ping)
+    # Live-Ping-Status setzen
     for server in config['servers']:
-        if 'status' not in server:
-            server['status'] = 'online'  # Default-Status
+        server['status'] = ping_checker.get_status(server['id'])
     
     return config
 
@@ -251,24 +381,24 @@ async def ssh_websocket(websocket: WebSocket):
             message = json.loads(data)
             
             action = message.get('action')
+            print(f"📨 WebSocket Action: {action}")
             
             if action == 'connect':
-                # SSH-Verbindung aufbauen
+                # SSH-Verbindung starten
                 host = message.get('host')
-                username = message.get('username')
-                password = message.get('password')
                 port = message.get('port', 22)
+                username = message.get('username')  # Get username from frontend
                 
-                print(f"📡 SSH-Verbindungsanfrage: {username}@{host}:{port}")
+                print(f"📡 SSH-Verbindung starten für: {username}@{host}:{port}")
                 
-                if not host or not username:
+                if not host:
                     await websocket.send_text(json.dumps({
                         'type': 'error',
-                        'message': 'Host and username are required'
+                        'message': 'Host is required'
                     }))
                     continue
                 
-                await ssh_conn.connect(host, username, port, password)
+                await ssh_conn.connect(host, port, username)
                 
             elif action == 'input':
                 # Input an SSH weiterleiten
@@ -305,9 +435,14 @@ if __name__ == "__main__":
     # Config beim Start laden
     load_server_config()
     
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
-        log_level="info"
-    )
+    try:
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=8000,
+            log_level="info"
+        )
+    finally:
+        # Cleanup beim Beenden
+        ping_checker.stop()
+        print("🧹 Backend sauber beendet")

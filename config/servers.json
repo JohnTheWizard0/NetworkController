@@ -49,14 +49,13 @@
       "shared": false,
       "access": {
         "ssh": true,
-        "ssh_user": "admin"
+        "ssh_user": "wizard"
       },
       "ports": [
         { "number": 8448, "service": "Federation" },
         { "number": 443, "service": "HTTPS" }
       ],
-      "notes": "",
-      "status": "online"
+      "notes": ""
     },
     {
       "id": "backup01",
@@ -76,8 +75,7 @@
         { "number": 22, "service": "SSH" },
         { "number": 873, "service": "Rsync" }
       ],
-      "notes": "Tägliche Backups um 02:00 Uhr",
-      "status": "offline"
+      "notes": "Tägliche Backups um 02:00 Uhr"
     }
   ]
 }

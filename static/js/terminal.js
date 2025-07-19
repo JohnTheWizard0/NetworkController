@@ -5,7 +5,6 @@ class SSHTerminal {
         this.fitAddon = null;
         this.socket = null;
         this.currentServer = null;
-        this.credentials = new Map(); // Store credentials per server
     }
 
     async openSSHTerminal(server) {
@@ -20,14 +19,11 @@ class SSHTerminal {
         
         this.currentServer = server;
         
-        // Check if we have credentials for this server
-        if (!this.credentials.has(server.id)) {
-            const creds = await this.promptForCredentials(server);
-            if (!creds) {
-                Utils.debugLog('❌ Keine Anmeldedaten eingegeben');
-                return;
-            }
-            this.credentials.set(server.id, creds);
+        // Prompt for username
+        const username = prompt(`SSH Benutzername für ${server.name} [${server.host}]:`, server.access.ssh_user || 'root');
+        if (!username) {
+            Utils.debugLog('❌ Kein Benutzername eingegeben');
+            return;
         }
         
         // Initialize terminal if not exists
@@ -40,7 +36,7 @@ class SSHTerminal {
         
         // Show modal
         document.getElementById('terminalModal').style.display = 'flex';
-        document.getElementById('terminalTitle').textContent = `SSH - ${server.name} [${server.host}]`;
+        document.getElementById('terminalTitle').textContent = `SSH - ${username}@${server.name} [${server.host}]`;
         
         // Fit terminal to container
         setTimeout(() => {
@@ -48,74 +44,8 @@ class SSHTerminal {
                 this.fitAddon.fit();
                 Utils.debugLog('📐 Terminal-Größe angepasst');
             }
-            this.connectSSH(server);
+            this.connectSSH(server, username);
         }, 100);
-    }
-
-    async promptForCredentials(server) {
-        return new Promise((resolve) => {
-            const modal = document.getElementById('sshAuthModal');
-            const serverNameSpan = document.getElementById('sshServerName');
-            const usernameInput = document.getElementById('sshUsername');
-            const passwordInput = document.getElementById('sshPassword');
-            const connectBtn = document.getElementById('sshConnectBtn');
-            const cancelBtn = document.getElementById('sshCancelBtn');
-            
-            // Set default username
-            serverNameSpan.textContent = `${server.name} [${server.host}]`;
-            usernameInput.value = server.access.ssh_user || 'root';
-            passwordInput.value = '';
-            
-            // Show modal
-            modal.style.display = 'flex';
-            passwordInput.focus();
-            
-            // Handle form submission
-            const handleConnect = () => {
-                const username = usernameInput.value.trim();
-                const password = passwordInput.value;
-                
-                if (!username || !password) {
-                    Utils.showToast('Benutzername und Passwort sind erforderlich');
-                    return;
-                }
-                
-                modal.style.display = 'none';
-                resolve({ username, password });
-            };
-            
-            const handleCancel = () => {
-                modal.style.display = 'none';
-                resolve(null);
-            };
-            
-            // Event listeners
-            connectBtn.onclick = handleConnect;
-            cancelBtn.onclick = handleCancel;
-            
-            // Enter key to connect
-            passwordInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    handleConnect();
-                }
-            });
-            
-            // ESC to cancel
-            document.addEventListener('keydown', function escListener(e) {
-                if (e.key === 'Escape' && modal.style.display === 'flex') {
-                    document.removeEventListener('keydown', escListener);
-                    handleCancel();
-                }
-            });
-            
-            // Click outside to cancel
-            modal.addEventListener('click', function clickListener(e) {
-                if (e.target === modal) {
-                    modal.removeEventListener('click', clickListener);
-                    handleCancel();
-                }
-            });
-        });
     }
 
     initializeTerminal() {
@@ -172,13 +102,6 @@ class SSHTerminal {
             this.terminal.open(document.getElementById('terminal'));
             Utils.debugLog('✅ Terminal erfolgreich initialisiert');
             
-            // Welcome message
-            this.terminal.writeln('\x1b[1;36m╔══════════════════════════════════════╗\x1b[0m');
-            this.terminal.writeln('\x1b[1;36m║        HomeLab SSH Terminal          ║\x1b[0m');
-            this.terminal.writeln('\x1b[1;36m╚══════════════════════════════════════╝\x1b[0m');
-            this.terminal.writeln('');
-            this.terminal.writeln('\x1b[33mBereit für SSH-Verbindung...\x1b[0m');
-            
             return true;
             
         } catch (error) {
@@ -188,17 +111,13 @@ class SSHTerminal {
         }
     }
 
-    connectSSH(server) {
-        Utils.debugLog(`🔌 Starte SSH-Verbindung zu ${server.host}...`);
+    connectSSH(server, username) {
+        Utils.debugLog(`🔌 Starte SSH-Verbindung zu ${username}@${server.host}...`);
         this.updateConnectionStatus('connecting', 'Verbinde...');
         
-        // Get credentials
-        const creds = this.credentials.get(server.id);
-        if (!creds) {
-            Utils.debugLog('❌ Keine Anmeldedaten verfügbar');
-            this.updateConnectionStatus('disconnected', 'Fehler');
-            return;
-        }
+        // Store username for later use
+        this.currentUsername = username;
+        this.currentServer = server;
         
         // Create WebSocket connection to backend
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -213,19 +132,24 @@ class SSHTerminal {
                 Utils.debugLog('✅ WebSocket-Verbindung hergestellt');
                 this.updateConnectionStatus('connected', 'Verbunden');
                 
-                // Send SSH connection request with credentials
+                // Send SSH connection request WITH username
                 const sshRequest = {
                     action: 'connect',
                     host: server.host,
-                    username: creds.username,
-                    password: creds.password,
-                    port: 22
+                    port: 22,
+                    username: username  // Include username
                 };
                 
-                Utils.debugLog(`📤 Sende SSH-Request für ${creds.username}@${server.host}`);
+                Utils.debugLog(`📤 Sende SSH-Request für ${username}@${server.host}`);
                 this.socket.send(JSON.stringify(sshRequest));
                 
-                this.terminal.writeln(`\x1b[32mVerbinde zu ${creds.username}@${server.host}...\x1b[0m`);
+                // Clear terminal and show connection info
+                this.terminal.clear();
+                this.terminal.writeln('\x1b[1;36m╔══════════════════════════════════════╗\x1b[0m');
+                this.terminal.writeln('\x1b[1;36m║        HomeLab SSH Terminal          ║\x1b[0m');
+                this.terminal.writeln('\x1b[1;36m╚══════════════════════════════════════╝\x1b[0m');
+                this.terminal.writeln('');
+                this.terminal.writeln(`\x1b[32mVerbinde zu ${username}@${server.host}...\x1b[0m`);
             };
             
             this.socket.onmessage = (event) => {
@@ -238,21 +162,14 @@ class SSHTerminal {
                             this.terminal.write(data.data);
                             break;
                         case 'connected':
-                            this.terminal.writeln('\x1b[32mSSH-Verbindung erfolgreich!\x1b[0m');
-                            document.getElementById('terminalInfo').textContent = `Verbunden mit ${server.name}`;
+                            this.updateConnectionStatus('connected', 'SSH Aktiv');
+                            document.getElementById('terminalInfo').textContent = `SSH Session - ${this.currentUsername}@${this.currentServer.name}`;
                             Utils.debugLog('🎉 SSH-Verbindung erfolgreich!');
                             break;
                         case 'error':
                             this.terminal.writeln(`\x1b[31mFehler: ${data.message}\x1b[0m`);
                             this.updateConnectionStatus('disconnected', 'Fehler');
                             Utils.debugLog(`❌ SSH-Fehler: ${data.message}`);
-                            
-                            // If authentication failed, remove stored credentials
-                            if (data.message.includes('authentication') || data.message.includes('Authentication')) {
-                                Utils.debugLog('🔑 Authentifizierung fehlgeschlagen - entferne gespeicherte Anmeldedaten');
-                                this.credentials.delete(server.id);
-                                Utils.showToast('Authentifizierung fehlgeschlagen. Versuche es erneut.');
-                            }
                             break;
                         case 'disconnected':
                             this.terminal.writeln('\x1b[33mVerbindung getrennt.\x1b[0m');
@@ -278,7 +195,7 @@ class SSHTerminal {
                 document.getElementById('terminalInfo').textContent = 'Verbindung geschlossen';
             };
             
-            // Handle terminal input
+            // Handle terminal input - This is crucial for interactive SSH
             this.terminal.onData((data) => {
                 if (this.socket && this.socket.readyState === WebSocket.OPEN) {
                     this.socket.send(JSON.stringify({
@@ -328,12 +245,6 @@ class SSHTerminal {
         Utils.debugLog('❌ Terminal schließen');
         this.disconnectSSH();
         document.getElementById('terminalModal').style.display = 'none';
-    }
-
-    // Clear stored credentials for a server (for re-authentication)
-    clearCredentials(serverId) {
-        this.credentials.delete(serverId);
-        Utils.debugLog(`🔑 Anmeldedaten für Server ${serverId} entfernt`);
     }
 }
 
