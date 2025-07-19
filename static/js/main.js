@@ -5,7 +5,6 @@ class HomelabDashboard {
         this.currentFilter = 'all';
         this.searchTerm = '';
         this.expandedCards = new Set();
-        this.statusRefreshInterval = null;
     }
 
     async initialize() {
@@ -28,9 +27,6 @@ class HomelabDashboard {
         // Initialize UI
         this.setupEventListeners();
         this.renderServers();
-        
-        // Start status refresh
-        this.startStatusRefresh();
         
         Utils.debugLog('✅ Server-Dashboard initialisiert');
     }
@@ -70,7 +66,7 @@ class HomelabDashboard {
     async loadServerConfig() {
         try {
             Utils.debugLog('📡 Lade Server-Konfiguration...');
-            const response = await fetch('/api/servers');
+            const response = await Utils.fetchWithTimeout('/api/servers', {}, 3000);
             
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -108,40 +104,6 @@ class HomelabDashboard {
         }
     }
 
-    startStatusRefresh() {
-        // Status alle 30 Sekunden aktualisieren
-        this.statusRefreshInterval = setInterval(async () => {
-            Utils.debugLog('🔄 Aktualisiere Server-Status...');
-            await this.refreshServerStatus();
-        }, 30000);
-        
-        Utils.debugLog('✅ Status-Refresh gestartet (30s Intervall)');
-    }
-
-    async refreshServerStatus() {
-        try {
-            const response = await fetch('/api/servers');
-            if (!response.ok) return;
-            
-            const newData = await response.json();
-            
-            // Status in aktuellen Daten aktualisieren
-            newData.servers.forEach(newServer => {
-                const oldServer = this.serverData.servers.find(s => s.id === newServer.id);
-                if (oldServer && oldServer.status !== newServer.status) {
-                    oldServer.status = newServer.status;
-                    Utils.debugLog(`📊 Status geändert - ${newServer.name}: ${newServer.status}`);
-                }
-            });
-            
-            // UI aktualisieren
-            this.renderServers();
-            
-        } catch (error) {
-            Utils.debugLog(`❌ Status-Refresh fehlgeschlagen: ${error.message}`);
-        }
-    }
-
     setupEventListeners() {
         // Tab Switching
         document.querySelectorAll('.tab').forEach(tab => {
@@ -170,6 +132,13 @@ class HomelabDashboard {
         // ESC key handlers
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
+                // Close any open modals
+                document.querySelectorAll('.modal').forEach(modal => {
+                    if (modal.style.display === 'flex') {
+                        modal.style.display = 'none';
+                    }
+                });
+                
                 // Close terminal
                 if (document.getElementById('terminalModal').style.display === 'flex') {
                     window.sshTerminal.closeTerminal();
@@ -319,7 +288,6 @@ class HomelabDashboard {
                 
                 <div class="server-actions">
                     ${server.access.ssh ? `<button class="action-btn ssh" onclick="dashboard.openSSH('${server.id}')">SSH</button>` : ''}
-                    <button class="action-btn ping" onclick="dashboard.pingServer('${server.id}')">Ping</button>
                     <button class="action-btn" onclick="dashboard.toggleServerCard('${server.id}')">${isExpanded ? 'Collapse ▲' : 'Expand ▼'}</button>
                 </div>
                 
@@ -382,29 +350,6 @@ class HomelabDashboard {
         this.renderServers();
     }
 
-    async pingServer(serverId) {
-        Utils.debugLog(`🏓 Ping Server: ${serverId}`);
-        
-        try {
-            const response = await fetch(`/api/ping/${serverId}`);
-            const result = await response.json();
-            
-            const statusText = result.status === 'online' ? 'Online ✅' : 'Offline ❌';
-            Utils.showToast(`${serverId}: ${statusText}`, result.status === 'online' ? 'success' : 'error');
-            
-            // Status in UI sofort aktualisieren
-            const server = this.serverData.servers.find(s => s.id === serverId);
-            if (server) {
-                server.status = result.status;
-                this.renderServers();
-            }
-            
-        } catch (error) {
-            Utils.debugLog(`❌ Ping fehlgeschlagen: ${error.message}`);
-            Utils.showToast('Ping fehlgeschlagen', 'error');
-        }
-    }
-
     openSSH(serverId) {
         Utils.debugLog(`🔑 SSH-Button geklickt für Server: ${serverId}`);
         
@@ -416,7 +361,7 @@ class HomelabDashboard {
         
         Utils.debugLog(`✅ Server gefunden: ${server.name} (${server.host})`);
         
-        // Direkt SSH-Terminal öffnen (ohne Modal)
+        // SSH-Terminal öffnen
         window.sshTerminal.openSSHTerminal(server);
     }
 
