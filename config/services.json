@@ -8,7 +8,7 @@
       "internal_url": "http://192.168.1.15:8000",
       "port": 8000,
       "category": "productivity",
-      "tags": ["projektmanagement", "tickets"]
+      "tags": ["projektmanagement", "tickets", "shared"]
     },
     {
       "name": "SillyTavern",
@@ -18,7 +18,7 @@
       "internal_url": "http://192.168.1.15:3000",
       "port": 3000,
       "category": "ai",
-      "tags": ["ai", "chat"]
+      "tags": ["ai", "chat", "llm"]
     },
     {
       "name": "Element",
@@ -28,11 +28,11 @@
       "internal_url": "https://192.168.1.14:443",
       "port": 443,
       "category": "communication",
-      "tags": ["matrix", "chat", "communication"]
+      "tags": ["matrix", "chat", "kommunikation", "shared"]
     },
     {
       "name": "Matrix Federation",
-      "description": "Matrix Server Federation",
+      "description": "Matrix Server Federation Port",
       "hostname": "HCM",
       "url": null,
       "internal_url": "http://192.168.1.14:8448",
@@ -42,23 +42,23 @@
     },
     {
       "name": "Restic Backup",
-      "description": "Backup Service",
+      "description": "Automatisierte Backup-Lösung",
       "hostname": "Backup01",
       "url": null,
       "internal_url": null,
       "port": null,
       "category": "backup",
-      "tags": ["backup", "restic"]
+      "tags": ["backup", "restic", "automatisch"]
     },
     {
       "name": "Rsync Server",
-      "description": "File Synchronization",
+      "description": "File Synchronization Service",
       "hostname": "Backup01",
       "url": null,
       "internal_url": "rsync://192.168.7.10",
       "port": 873,
       "category": "backup",
-      "tags": ["rsync", "sync", "backup"]
+      "tags": ["rsync", "sync", "dateien"]
     }
   ]
 }

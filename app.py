@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 HomeLab Dashboard SSH Backend
-FastAPI + WebSocket + Simple subprocess SSH
+FastAPI + WebSocket + Simple subprocess SSH + CRUD Management
 """
 
 import asyncio
@@ -13,13 +13,52 @@ import os
 import pty
 import select
 import signal
+import shutil
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 import uvicorn
+
+
+# Pydantic Models for CRUD Operations
+class ServerModel(BaseModel):
+    hostname: str
+    description: str
+    category_id: str
+    host: str
+    shared: bool = False
+    access: dict = {"ssh": False, "ssh_user": "root"}
+    notes: str = ""
+
+class ServiceModel(BaseModel):
+    name: str
+    description: str
+    hostname: str
+    url: Optional[str] = None
+    internal_url: Optional[str] = None
+    port: Optional[int] = None
+    category: str
+    tags: List[str] = []
+
+class CategoryModel(BaseModel):
+    id: str
+    name: str
+    subnet: str
+    color: str
+    description: str = ""
+
+class ServiceCategoryModel(BaseModel):
+    id: str
+    name: str
+    description: str
+    color: str
+    icon: str
+    order: int
 
 
 class SSHConnection:
@@ -261,6 +300,42 @@ class PingChecker:
         self.running = False
 
 
+class ConfigManager:
+    """Verwaltet Konfigurationsdateien mit Backup-Funktionalität"""
+    
+    def __init__(self):
+        self.config_dir = Path("config")
+        self.backup_dir = Path("config/backups")
+        self.backup_dir.mkdir(parents=True, exist_ok=True)
+    
+    def create_backup(self, config_type: str):
+        """Erstellt Backup einer Konfigurationsdatei"""
+        config_file = self.config_dir / f"{config_type}.json"
+        if config_file.exists():
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_file = self.backup_dir / f"{config_type}_{timestamp}.json"
+            shutil.copy2(config_file, backup_file)
+            print(f"📦 Backup erstellt: {backup_file}")
+    
+    def save_config(self, config_type: str, data: dict):
+        """Speichert Konfiguration mit Backup"""
+        try:
+            # Backup erstellen
+            self.create_backup(config_type)
+            
+            # Neue Konfiguration speichern
+            config_file = self.config_dir / f"{config_type}.json"
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            print(f"✅ Konfiguration gespeichert: {config_file}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Fehler beim Speichern von {config_type}: {e}")
+            return False
+
+
 # FastAPI App
 app = FastAPI(title="HomeLab Dashboard")
 
@@ -274,17 +349,20 @@ connections: Dict[str, SSHConnection] = {}
 config_cache = {
     'servers': None,
     'categories': None,
-    'services': None
+    'services': None,
+    'service_categories': None
 }
 
 config_paths = {
     'servers': Path("config/servers.json"),
     'categories': Path("config/categories.json"),
-    'services': Path("config/services.json")
+    'services': Path("config/services.json"),
+    'service_categories': Path("config/service-categories.json")
 }
 
-# Ping Checker
+# Ping Checker and Config Manager
 ping_checker = PingChecker()
+config_manager = ConfigManager()
 
 
 def load_config_file(config_type: str):
@@ -323,11 +401,16 @@ def get_fallback_config(config_type: str):
                     "description": f"config/{config_type}.json erstellen",
                     "category_id": "intern",
                     "host": "127.0.0.1",
-                    "shared": false,
-                    "access": {"ssh": false},
+                    "shared": False,
+                    "access": {"ssh": False},
                     "notes": f"Erstelle config/{config_type}.json",
                     "status": "offline"
                 }
+            ]
+        },
+        'service_categories': {
+            "service_categories": [
+                {"id": "admin", "name": "Administration", "description": "System-Tools", "color": "#e74c3c", "icon": "⚙️", "order": 1}
             ]
         }
     }
@@ -352,6 +435,7 @@ def enrich_data():
     
     # Kategorien als Dict für schnellen Lookup
     categories_dict = {cat['id']: cat for cat in config_cache['categories']['categories']}
+    service_categories_dict = {cat['id']: cat for cat in config_cache['service_categories']['service_categories']}
     
     # Services gruppiert nach hostname
     services_by_hostname = {}
@@ -376,10 +460,18 @@ def enrich_data():
         
         enriched_servers.append(server)
     
+    # Services mit Kategorie-Info anreichern
+    enriched_services = []
+    for service in config_cache['services']['services']:
+        service_copy = service.copy()
+        service_copy['category_info'] = service_categories_dict.get(service['category'], {})
+        enriched_services.append(service_copy)
+    
     return {
         'servers': enriched_servers,
         'categories': config_cache['categories']['categories'],
-        'services': config_cache['services']['services']
+        'services': enriched_services,
+        'service_categories': sorted(config_cache['service_categories']['service_categories'], key=lambda x: x['order'])
     }
 
 
@@ -409,12 +501,9 @@ async def get_dashboard_data():
 
 @app.get("/api/servers")
 async def get_servers():
-    """Server-Konfiguration (Legacy-Endpoint für Kompatibilität)"""
-    dashboard_data = await get_dashboard_data()
-    return {
-        'networks': dashboard_data['categories'],  # Backward compatibility
-        'servers': dashboard_data['servers']
-    }
+    """Server-Konfiguration"""
+    config_cache['servers'] = load_config_file('servers')
+    return config_cache['servers']
 
 
 @app.get("/api/categories")
@@ -429,6 +518,231 @@ async def get_services():
     """Services-Konfiguration"""
     config_cache['services'] = load_config_file('services')
     return config_cache['services']
+
+
+@app.get("/api/service-categories")
+async def get_service_categories():
+    """Service-Kategorien-Konfiguration"""
+    config_cache['service_categories'] = load_config_file('service_categories')
+    return config_cache['service_categories']
+
+
+# CRUD Endpoints für Server
+@app.post("/api/servers")
+async def create_server(server: ServerModel):
+    """Server erstellen"""
+    config_cache['servers'] = load_config_file('servers')
+    servers = config_cache['servers']['servers']
+    
+    # Check if hostname already exists
+    if any(s['hostname'] == server.hostname for s in servers):
+        raise HTTPException(status_code=400, detail="Hostname already exists")
+    
+    # Add new server
+    new_server = server.dict()
+    new_server['status'] = 'unknown'
+    servers.append(new_server)
+    
+    # Save configuration
+    if config_manager.save_config('servers', config_cache['servers']):
+        return {"message": "Server created successfully", "server": new_server}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save configuration")
+
+
+@app.put("/api/servers/{hostname}")
+async def update_server(hostname: str, server: ServerModel):
+    """Server aktualisieren"""
+    config_cache['servers'] = load_config_file('servers')
+    servers = config_cache['servers']['servers']
+    
+    # Find server
+    for i, s in enumerate(servers):
+        if s['hostname'] == hostname:
+            # Update server (keep status)
+            updated_server = server.dict()
+            updated_server['status'] = s.get('status', 'unknown')
+            servers[i] = updated_server
+            
+            # Save configuration
+            if config_manager.save_config('servers', config_cache['servers']):
+                return {"message": "Server updated successfully", "server": updated_server}
+            else:
+                raise HTTPException(status_code=500, detail="Failed to save configuration")
+    
+    raise HTTPException(status_code=404, detail="Server not found")
+
+
+@app.delete("/api/servers/{hostname}")
+async def delete_server(hostname: str):
+    """Server löschen"""
+    config_cache['servers'] = load_config_file('servers')
+    servers = config_cache['servers']['servers']
+    
+    # Find and remove server
+    for i, s in enumerate(servers):
+        if s['hostname'] == hostname:
+            removed_server = servers.pop(i)
+            
+            # Save configuration
+            if config_manager.save_config('servers', config_cache['servers']):
+                return {"message": "Server deleted successfully", "server": removed_server}
+            else:
+                raise HTTPException(status_code=500, detail="Failed to save configuration")
+    
+    raise HTTPException(status_code=404, detail="Server not found")
+
+
+# CRUD Endpoints für Services
+@app.post("/api/services")
+async def create_service(service: ServiceModel):
+    """Service erstellen"""
+    config_cache['services'] = load_config_file('services')
+    services = config_cache['services']['services']
+    
+    # Add new service
+    new_service = service.dict()
+    services.append(new_service)
+    
+    # Save configuration
+    if config_manager.save_config('services', config_cache['services']):
+        return {"message": "Service created successfully", "service": new_service}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save configuration")
+
+
+@app.put("/api/services/{service_name}")
+async def update_service(service_name: str, service: ServiceModel):
+    """Service aktualisieren"""
+    config_cache['services'] = load_config_file('services')
+    services = config_cache['services']['services']
+    
+    # Find service
+    for i, s in enumerate(services):
+        if s['name'] == service_name:
+            services[i] = service.dict()
+            
+            # Save configuration
+            if config_manager.save_config('services', config_cache['services']):
+                return {"message": "Service updated successfully", "service": service.dict()}
+            else:
+                raise HTTPException(status_code=500, detail="Failed to save configuration")
+    
+    raise HTTPException(status_code=404, detail="Service not found")
+
+
+@app.delete("/api/services/{service_name}")
+async def delete_service(service_name: str):
+    """Service löschen"""
+    config_cache['services'] = load_config_file('services')
+    services = config_cache['services']['services']
+    
+    # Find and remove service
+    for i, s in enumerate(services):
+        if s['name'] == service_name:
+            removed_service = services.pop(i)
+            
+            # Save configuration
+            if config_manager.save_config('services', config_cache['services']):
+                return {"message": "Service deleted successfully", "service": removed_service}
+            else:
+                raise HTTPException(status_code=500, detail="Failed to save configuration")
+    
+    raise HTTPException(status_code=404, detail="Service not found")
+
+
+# CRUD Endpoints für Service-Kategorien
+@app.post("/api/service-categories")
+async def create_service_category(category: ServiceCategoryModel):
+    """Service-Kategorie erstellen"""
+    config_cache['service_categories'] = load_config_file('service_categories')
+    categories = config_cache['service_categories']['service_categories']
+    
+    # Check if ID already exists
+    if any(c['id'] == category.id for c in categories):
+        raise HTTPException(status_code=400, detail="Category ID already exists")
+    
+    # Add new category
+    new_category = category.dict()
+    categories.append(new_category)
+    
+    # Save configuration
+    if config_manager.save_config('service-categories', config_cache['service_categories']):
+        return {"message": "Service category created successfully", "category": new_category}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save configuration")
+
+
+@app.put("/api/service-categories/{category_id}")
+async def update_service_category(category_id: str, category: ServiceCategoryModel):
+    """Service-Kategorie aktualisieren"""
+    config_cache['service_categories'] = load_config_file('service_categories')
+    categories = config_cache['service_categories']['service_categories']
+    
+    # Find category
+    for i, c in enumerate(categories):
+        if c['id'] == category_id:
+            categories[i] = category.dict()
+            
+            # Save configuration
+            if config_manager.save_config('service-categories', config_cache['service_categories']):
+                return {"message": "Service category updated successfully", "category": category.dict()}
+            else:
+                raise HTTPException(status_code=500, detail="Failed to save configuration")
+    
+    raise HTTPException(status_code=404, detail="Service category not found")
+
+
+@app.delete("/api/service-categories/{category_id}")
+async def delete_service_category(category_id: str):
+    """Service-Kategorie löschen"""
+    config_cache['service_categories'] = load_config_file('service_categories')
+    categories = config_cache['service_categories']['service_categories']
+    
+    # Find and remove category
+    for i, c in enumerate(categories):
+        if c['id'] == category_id:
+            removed_category = categories.pop(i)
+            
+            # Save configuration
+            if config_manager.save_config('service-categories', config_cache['service_categories']):
+                return {"message": "Service category deleted successfully", "category": removed_category}
+            else:
+                raise HTTPException(status_code=500, detail="Failed to save configuration")
+    
+    raise HTTPException(status_code=404, detail="Service category not found")
+
+
+# Endpoint für Kategorie-Sortierung
+@app.put("/api/service-categories/reorder")
+async def reorder_service_categories(category_order: List[str]):
+    """Service-Kategorien neu sortieren"""
+    config_cache['service_categories'] = load_config_file('service_categories')
+    categories = config_cache['service_categories']['service_categories']
+    
+    # Update order based on position in list
+    categories_dict = {c['id']: c for c in categories}
+    reordered_categories = []
+    
+    for i, category_id in enumerate(category_order):
+        if category_id in categories_dict:
+            category = categories_dict[category_id]
+            category['order'] = i + 1
+            reordered_categories.append(category)
+    
+    # Add any categories not in the order list
+    for category in categories:
+        if category['id'] not in category_order:
+            category['order'] = len(category_order) + 1
+            reordered_categories.append(category)
+    
+    config_cache['service_categories']['service_categories'] = reordered_categories
+    
+    # Save configuration
+    if config_manager.save_config('service-categories', config_cache['service_categories']):
+        return {"message": "Service categories reordered successfully", "categories": reordered_categories}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save configuration")
 
 
 @app.websocket("/ws/ssh")

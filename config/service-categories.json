@@ -1,0 +1,68 @@
+{
+  "service_categories": [
+    {
+      "id": "admin",
+      "name": "Administration", 
+      "description": "System-Administration und Management-Tools",
+      "color": "#e74c3c",
+      "icon": "⚙️",
+      "order": 1
+    },
+    {
+      "id": "productivity",
+      "name": "Produktivität",
+      "description": "Projektmanagement und Office-Tools", 
+      "color": "#3498db",
+      "icon": "📊",
+      "order": 2
+    },
+    {
+      "id": "communication",
+      "name": "Kommunikation",
+      "description": "Chat, E-Mail und Collaboration",
+      "color": "#2ecc71", 
+      "icon": "💬",
+      "order": 3
+    },
+    {
+      "id": "media",
+      "name": "Medien",
+      "description": "Streaming, Fotos und Unterhaltung",
+      "color": "#9b59b6",
+      "icon": "🎬",
+      "order": 4
+    },
+    {
+      "id": "development",
+      "name": "Development",
+      "description": "Entwicklungstools und CI/CD",
+      "color": "#f39c12",
+      "icon": "💻",
+      "order": 5
+    },
+    {
+      "id": "ai",
+      "name": "AI & ML",
+      "description": "Künstliche Intelligenz und Machine Learning",
+      "color": "#1abc9c",
+      "icon": "🤖",
+      "order": 6
+    },
+    {
+      "id": "backup",
+      "name": "Backup & Storage",
+      "description": "Datensicherung und Speicher-Services",
+      "color": "#95a5a6",
+      "icon": "💾",
+      "order": 7
+    },
+    {
+      "id": "shared",
+      "name": "Shared Services",
+      "description": "Von mehreren Nutzern verwendete Services",
+      "color": "#16a085",
+      "icon": "👥",
+      "order": 8
+    }
+  ]
+}
